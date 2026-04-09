@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>同步详情 #{{ log.id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+    <main class="page narrow">
+        <section class="panel">
+            <div class="panel-head">
+                <h1>同步详情 #{{ log.id }}</h1>
+                <a href="/dashboard">返回仪表盘</a>
+            </div>
+
+            <table class="detail-table">
+                <tbody>
+                    <tr><th>时间</th><td>{{ log.occurred_at }}</td></tr>
+                    <tr><th>动作</th><td>{{ log.action }}</td></tr>
+                    <tr><th>UUID</th><td><code>{{ log.sync_uuid or 'unknown' }}</code></td></tr>
+                    <tr><th>结果</th><td>{{ log.outcome }}</td></tr>
+                    <tr><th>HTTP 状态码</th><td>{{ log.http_status or '-' }}</td></tr>
+                    <tr><th>请求方法</th><td>{{ log.request_method }}</td></tr>
+                    <tr><th>请求路径</th><td><code>{{ log.request_path }}</code></td></tr>
+                    <tr><th>Query</th><td><code>{{ log.query_string or '-' }}</code></td></tr>
+                    <tr><th>客户端 IP</th><td>{{ log.client_ip or '-' }}</td></tr>
+                    <tr><th>User-Agent</th><td>{{ log.user_agent or '-' }}</td></tr>
+                    <tr><th>耗时</th><td>{{ log.duration_ms }} ms</td></tr>
+                    <tr><th>请求载荷大小</th><td>{{ log.payload_size }} bytes</td></tr>
+                    <tr><th>请求载荷摘要</th><td><code>{{ log.payload_hash or '-' }}</code></td></tr>
+                    <tr><th>响应大小</th><td>{{ log.response_size }} bytes</td></tr>
+                    <tr><th>错误信息</th><td>{{ log.error_message or '-' }}</td></tr>
+                </tbody>
+            </table>
+
+            <div class="excerpt-box">
+                <h2>响应摘要</h2>
+                <pre>{{ log.response_excerpt or '-' }}</pre>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
