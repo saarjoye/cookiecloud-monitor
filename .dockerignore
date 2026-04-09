@@ -3,3 +3,5 @@
 __pycache__
 *.pyc
 data
+frontend/node_modules
+app/static/login-app

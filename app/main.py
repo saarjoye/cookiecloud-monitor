@@ -8,19 +8,20 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
+from starlette.middleware.sessions import SessionMiddleware
 
 
 APP_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(APP_ROOT / "templates"))
-security = HTTPBasic(auto_error=False)
 
 
 @dataclass(frozen=True)
@@ -31,10 +32,29 @@ class Settings:
     dashboard_username: str
     dashboard_password: str
     recent_log_limit: int
+    session_secret: str
+    session_cookie_name: str
+    session_max_age: int
+    wecom_corp_id: str
+    wecom_agent_id: str
+    wecom_secret: str
+    wecom_to_user: str
+    wecom_to_party: str
+    wecom_to_tag: str
 
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.timezone_name)
+
+    @property
+    def dashboard_auth_enabled(self) -> bool:
+        return bool(self.dashboard_username or self.dashboard_password)
+
+    @property
+    def wecom_enabled(self) -> bool:
+        return all((self.wecom_corp_id, self.wecom_agent_id, self.wecom_secret)) and any(
+            (self.wecom_to_user, self.wecom_to_party, self.wecom_to_tag)
+        )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -45,11 +65,28 @@ class Settings:
             dashboard_username=os.getenv("DASHBOARD_USERNAME", ""),
             dashboard_password=os.getenv("DASHBOARD_PASSWORD", ""),
             recent_log_limit=max(int(os.getenv("RECENT_LOG_LIMIT", "50")), 10),
+            session_secret=os.getenv("SESSION_SECRET", "") or secrets.token_hex(32),
+            session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "cookiecloud_monitor_session"),
+            session_max_age=max(int(os.getenv("SESSION_MAX_AGE", "1209600")), 3600),
+            wecom_corp_id=os.getenv("WECOM_CORP_ID", ""),
+            wecom_agent_id=os.getenv("WECOM_AGENT_ID", ""),
+            wecom_secret=os.getenv("WECOM_SECRET", ""),
+            wecom_to_user=os.getenv("WECOM_TO_USER", ""),
+            wecom_to_party=os.getenv("WECOM_TO_PARTY", ""),
+            wecom_to_tag=os.getenv("WECOM_TO_TAG", ""),
         )
 
 
 settings = Settings.from_env()
 app = FastAPI(title="CookieCloud Monitor", version="0.1.0")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    session_cookie=settings.session_cookie_name,
+    max_age=settings.session_max_age,
+    same_site="lax",
+    https_only=False,
+)
 app.mount("/static", StaticFiles(directory=str(APP_ROOT / "static")), name="static")
 
 
@@ -81,6 +118,43 @@ CREATE INDEX IF NOT EXISTS idx_sync_logs_day_action
 ON sync_logs (occurred_day, action, outcome);
 """
 
+CREATE_SYNC_STATES_SQL = """
+CREATE TABLE IF NOT EXISTS sync_states (
+    sync_uuid TEXT PRIMARY KEY,
+    first_seen_at TEXT NOT NULL,
+    last_sync_at TEXT NOT NULL,
+    last_payload_hash TEXT,
+    last_cookie_count INTEGER,
+    last_site_count INTEGER,
+    total_sync_count INTEGER NOT NULL DEFAULT 1
+);
+"""
+
+CREATE_AUTH_EVENTS_SQL = """
+CREATE TABLE IF NOT EXISTS auth_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at TEXT NOT NULL,
+    username TEXT NOT NULL,
+    client_ip TEXT,
+    user_agent TEXT,
+    outcome TEXT NOT NULL
+);
+"""
+
+CREATE_AUTH_EVENTS_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_auth_events_occurred_at
+ON auth_events (occurred_at DESC);
+"""
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    next: str = "/dashboard"
+
+
+WECOM_TOKEN_CACHE: dict[str, Any] = {"access_token": None, "expires_at": 0.0}
+
 
 def get_db_connection() -> sqlite3.Connection:
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,6 +167,9 @@ def init_db() -> None:
     with get_db_connection() as connection:
         connection.execute(CREATE_LOGS_SQL)
         connection.execute(CREATE_INDEX_SQL)
+        connection.execute(CREATE_SYNC_STATES_SQL)
+        connection.execute(CREATE_AUTH_EVENTS_SQL)
+        connection.execute(CREATE_AUTH_EVENTS_INDEX_SQL)
         connection.commit()
 
 
@@ -215,6 +292,321 @@ def build_target_url(path: str) -> str:
     return f"{settings.cookiecloud_target_url}{path}"
 
 
+def sanitize_next_path(next_path: str | None) -> str:
+    if not next_path or not next_path.startswith("/") or next_path.startswith("//"):
+        return "/dashboard"
+    return next_path
+
+
+def build_login_redirect(next_path: str | None) -> RedirectResponse:
+    destination = sanitize_next_path(next_path)
+    return RedirectResponse(url=f"/login?next={quote(destination, safe='/=?&')}", status_code=303)
+
+
+def is_authenticated(request: Request) -> bool:
+    if not settings.dashboard_auth_enabled:
+        return True
+    return bool(request.session.get("authenticated"))
+
+
+def require_api_auth(request: Request) -> None:
+    if not is_authenticated(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def record_auth_event(request: Request, username: str, outcome: str) -> None:
+    with get_db_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO auth_events (occurred_at, username, client_ip, user_agent, outcome)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                now_local().isoformat(timespec="seconds"),
+                username,
+                client_ip_from_request(request),
+                request.headers.get("user-agent"),
+                outcome,
+            ),
+        )
+        connection.commit()
+
+
+def parse_json_text(raw_text: str | None) -> Any | None:
+    if not raw_text:
+        return None
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        return None
+
+
+def iter_cookie_like_entries(value: Any) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        if {"name", "value"}.issubset(value.keys()):
+            matches.append(value)
+        for item in value.values():
+            matches.extend(iter_cookie_like_entries(item))
+    elif isinstance(value, list):
+        for item in value:
+            matches.extend(iter_cookie_like_entries(item))
+    return matches
+
+
+def extract_sync_counts(form_data: dict[str, Any]) -> tuple[int | None, int | None]:
+    payload = parse_json_text(
+        extract_candidate(
+            form_data,
+            "cookie_data",
+            "data",
+            "payload",
+            "local_storage_data",
+        )
+    )
+    if payload is None:
+        return None, None
+
+    cookies = iter_cookie_like_entries(payload)
+    if not cookies:
+        return None, None
+
+    domains = {
+        normalize_form_value(item.get("domain") or item.get("host") or item.get("site") or item.get("url"))
+        for item in cookies
+        if item.get("domain") or item.get("host") or item.get("site") or item.get("url")
+    }
+    return len(cookies), len(domains) if domains else None
+
+
+def update_sync_state(
+    sync_uuid: str | None,
+    payload_hash: str | None,
+    cookie_count: int | None,
+    site_count: int | None,
+) -> dict[str, Any]:
+    if not sync_uuid:
+        return {
+            "is_first_sync": False,
+            "payload_changed": False,
+            "cookie_count": cookie_count,
+            "site_count": site_count,
+            "previous_cookie_count": None,
+            "cookie_delta": None,
+        }
+
+    timestamp = now_local().isoformat(timespec="seconds")
+    with get_db_connection() as connection:
+        existing = connection.execute("SELECT * FROM sync_states WHERE sync_uuid = ?", (sync_uuid,)).fetchone()
+
+        if existing is None:
+            connection.execute(
+                """
+                INSERT INTO sync_states (
+                    sync_uuid, first_seen_at, last_sync_at, last_payload_hash,
+                    last_cookie_count, last_site_count, total_sync_count
+                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                """,
+                (sync_uuid, timestamp, timestamp, payload_hash, cookie_count, site_count),
+            )
+            connection.commit()
+            return {
+                "is_first_sync": True,
+                "payload_changed": bool(payload_hash),
+                "cookie_count": cookie_count,
+                "site_count": site_count,
+                "previous_cookie_count": None,
+                "cookie_delta": None,
+            }
+
+        previous_cookie_count = existing["last_cookie_count"]
+        previous_site_count = existing["last_site_count"]
+        next_cookie_count = cookie_count if cookie_count is not None else previous_cookie_count
+        next_site_count = site_count if site_count is not None else previous_site_count
+        payload_changed = bool(payload_hash and payload_hash != existing["last_payload_hash"])
+        cookie_delta = None
+        if previous_cookie_count is not None and cookie_count is not None:
+            cookie_delta = cookie_count - previous_cookie_count
+
+        connection.execute(
+            """
+            UPDATE sync_states
+            SET last_sync_at = ?,
+                last_payload_hash = ?,
+                last_cookie_count = ?,
+                last_site_count = ?,
+                total_sync_count = total_sync_count + 1
+            WHERE sync_uuid = ?
+            """,
+            (timestamp, payload_hash, next_cookie_count, next_site_count, sync_uuid),
+        )
+        connection.commit()
+
+    return {
+        "is_first_sync": False,
+        "payload_changed": payload_changed,
+        "cookie_count": next_cookie_count,
+        "site_count": next_site_count,
+        "previous_cookie_count": previous_cookie_count,
+        "cookie_delta": cookie_delta,
+    }
+
+
+async def get_wecom_access_token() -> str:
+    now_ts = time.time()
+    cached_token = WECOM_TOKEN_CACHE.get("access_token")
+    if cached_token and now_ts < float(WECOM_TOKEN_CACHE.get("expires_at", 0)):
+        return str(cached_token)
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+            params={"corpid": settings.wecom_corp_id, "corpsecret": settings.wecom_secret},
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+    if payload.get("errcode") != 0:
+        raise RuntimeError(payload.get("errmsg") or "Unable to fetch WeCom access token")
+
+    expires_in = int(payload.get("expires_in", 7200))
+    token = str(payload["access_token"])
+    WECOM_TOKEN_CACHE["access_token"] = token
+    WECOM_TOKEN_CACHE["expires_at"] = now_ts + max(expires_in - 120, 60)
+    return token
+
+
+async def send_wecom_markdown(title: str, body_lines: list[str]) -> None:
+    if not settings.wecom_enabled:
+        return
+
+    receiver_payload = {
+        "touser": settings.wecom_to_user or None,
+        "toparty": settings.wecom_to_party or None,
+        "totag": settings.wecom_to_tag or None,
+    }
+    message_payload = {key: value for key, value in receiver_payload.items() if value}
+    if not message_payload:
+        return
+
+    token = await get_wecom_access_token()
+    message_payload.update(
+        {
+            "msgtype": "markdown",
+            "agentid": int(settings.wecom_agent_id),
+            "markdown": {"content": "\n".join([f"# {title}", *body_lines])},
+            "safe": 0,
+            "enable_duplicate_check": 0,
+        }
+    )
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            "https://qyapi.weixin.qq.com/cgi-bin/message/send",
+            params={"access_token": token},
+            json=message_payload,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+    if payload.get("errcode") != 0:
+        raise RuntimeError(payload.get("errmsg") or "Unable to send WeCom message")
+
+"""
+
+async def send_login_notification(request: Request, username: str) -> None:
+    if not settings.wecom_enabled:
+        return
+    await send_wecom_markdown(
+        "CookieCloud 控制台登录提醒",
+        [
+            f"> 账号：`{username}`",
+            f"> 时间：`{now_local().isoformat(timespec='seconds')}`",
+            f"> IP：`{client_ip_from_request(request) or '-'}`",
+            f"> UA：`{(request.headers.get('user-agent') or '-')[:180]}`",
+        ],
+    )
+
+
+async def send_sync_notification(sync_uuid: str, state: dict[str, Any], request: Request) -> None:
+    if not settings.wecom_enabled:
+        return
+
+    title = ""
+    if state["is_first_sync"]:
+        title = "CookieCloud 首次同步提醒"
+    elif state["cookie_delta"] is not None and state["cookie_delta"] > 0:
+        title = "CookieCloud CK 数量增加"
+    elif state["cookie_delta"] is not None and state["cookie_delta"] < 0:
+        title = "CookieCloud CK 数量减少"
+    elif state["payload_changed"]:
+        title = "CookieCloud 同步内容更新"
+    else:
+        return
+
+    body_lines = [
+        f"> UUID：`{sync_uuid}`",
+        f"> 时间：`{now_local().isoformat(timespec='seconds')}`",
+        f"> 来源 IP：`{client_ip_from_request(request) or '-'}`",
+        f"> 当前 CK 数：`{state['cookie_count'] if state['cookie_count'] is not None else '-'}`",
+        f"> 站点数：`{state['site_count'] if state['site_count'] is not None else '-'}`",
+    ]
+    if state["previous_cookie_count"] is not None:
+        body_lines.append(f"> 变更前 CK 数：`{state['previous_cookie_count']}`")
+    if state["cookie_delta"] is not None:
+        sign = "+" if state["cookie_delta"] > 0 else ""
+        body_lines.append(f"> 变化值：`{sign}{state['cookie_delta']}`")
+
+    await send_wecom_markdown(title, body_lines)
+"""
+
+
+async def send_login_notification(request: Request, username: str) -> None:
+    if not settings.wecom_enabled:
+        return
+    await send_wecom_markdown(
+        "CookieCloud Console Login Alert",
+        [
+            f"> User: `{username}`",
+            f"> Time: `{now_local().isoformat(timespec='seconds')}`",
+            f"> IP: `{client_ip_from_request(request) or '-'}`",
+            f"> UA: `{(request.headers.get('user-agent') or '-')[:180]}`",
+        ],
+    )
+
+
+async def send_sync_notification(sync_uuid: str, state: dict[str, Any], request: Request) -> None:
+    if not settings.wecom_enabled:
+        return
+
+    title = ""
+    if state["is_first_sync"]:
+        title = "CookieCloud First Sync Alert"
+    elif state["cookie_delta"] is not None and state["cookie_delta"] > 0:
+        title = "CookieCloud CK Count Increased"
+    elif state["cookie_delta"] is not None and state["cookie_delta"] < 0:
+        title = "CookieCloud CK Count Decreased"
+    elif state["payload_changed"]:
+        title = "CookieCloud Sync Payload Updated"
+    else:
+        return
+
+    body_lines = [
+        f"> UUID: `{sync_uuid}`",
+        f"> Time: `{now_local().isoformat(timespec='seconds')}`",
+        f"> Source IP: `{client_ip_from_request(request) or '-'}`",
+        f"> Current CK Count: `{state['cookie_count'] if state['cookie_count'] is not None else '-'}`",
+        f"> Site Count: `{state['site_count'] if state['site_count'] is not None else '-'}`",
+    ]
+    if state["previous_cookie_count"] is not None:
+        body_lines.append(f"> Previous CK Count: `{state['previous_cookie_count']}`")
+    if state["cookie_delta"] is not None:
+        sign = "+" if state["cookie_delta"] > 0 else ""
+        body_lines.append(f"> Delta: `{sign}{state['cookie_delta']}`")
+
+    await send_wecom_markdown(title, body_lines)
+
+
 def record_sync_log(
     *,
     action: str,
@@ -266,6 +658,7 @@ def record_sync_log(
         )
         connection.commit()
 
+"""
 
 def require_dashboard_auth(credentials: HTTPBasicCredentials | None = Depends(security)) -> None:
     if not settings.dashboard_username and not settings.dashboard_password:
@@ -276,6 +669,16 @@ def require_dashboard_auth(credentials: HTTPBasicCredentials | None = Depends(se
     password_matches = secrets.compare_digest(credentials.password, settings.dashboard_password)
     if not (username_matches and password_matches):
         raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
+"""
+
+
+def require_page_auth(request: Request) -> RedirectResponse | None:
+    if is_authenticated(request):
+        return None
+    next_path = request.url.path
+    if request.url.query:
+        next_path = f"{next_path}?{request.url.query}"
+    return build_login_redirect(next_path)
 
 
 async def forward_to_cookiecloud(
@@ -290,8 +693,66 @@ async def forward_to_cookiecloud(
 
 
 @app.get("/", include_in_schema=False)
-async def root() -> RedirectResponse:
-    return RedirectResponse(url="/dashboard")
+async def root(request: Request) -> RedirectResponse:
+    if settings.dashboard_auth_enabled and not is_authenticated(request):
+        return build_login_redirect("/dashboard")
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: str | None = Query(default="/dashboard")) -> Response:
+    if is_authenticated(request):
+        return RedirectResponse(url=sanitize_next_path(next), status_code=303)
+    return TEMPLATES.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "next_path": sanitize_next_path(next),
+            "auth_enabled": settings.dashboard_auth_enabled,
+        },
+    )
+
+
+@app.post("/auth/login")
+async def login(request: Request, payload: LoginRequest = Body(...)) -> JSONResponse:
+    redirect_to = sanitize_next_path(payload.next)
+    if not settings.dashboard_auth_enabled:
+        return JSONResponse({"ok": True, "redirect": redirect_to})
+
+    username_matches = secrets.compare_digest(payload.username, settings.dashboard_username)
+    password_matches = secrets.compare_digest(payload.password, settings.dashboard_password)
+    if not (username_matches and password_matches):
+        record_auth_event(request, payload.username, "failed")
+        return JSONResponse(status_code=401, content={"message": "Invalid username or password"})
+
+    request.session.clear()
+    request.session["authenticated"] = True
+    request.session["username"] = payload.username
+    request.session["logged_in_at"] = now_local().isoformat(timespec="seconds")
+    record_auth_event(request, payload.username, "success")
+    try:
+        await send_login_notification(request, payload.username)
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "redirect": redirect_to})
+
+
+@app.get("/auth/logout")
+@app.post("/auth/logout")
+async def logout(request: Request) -> Response:
+    request.session.clear()
+    if "application/json" in (request.headers.get("accept") or ""):
+        return JSONResponse({"ok": True, "redirect": "/login"})
+    return RedirectResponse(url="/login", status_code=303)
+
+
+@app.get("/api/me")
+async def api_me(request: Request) -> dict[str, Any]:
+    return {
+        "authenticated": is_authenticated(request),
+        "username": request.session.get("username"),
+        "auth_enabled": settings.dashboard_auth_enabled,
+    }
 
 
 @app.get("/healthz")
@@ -305,6 +766,7 @@ async def proxy_update(request: Request) -> Response:
     form_map: dict[str, Any] = dict(form.multi_items())
     sync_uuid = extract_candidate(form_map, "uuid", "userUUID", "user_uuid", "id")
     payload_size, payload_hash = build_payload_digest(form_map)
+    cookie_count, site_count = extract_sync_counts(form_map)
     start_time = time.perf_counter()
 
     try:
@@ -317,6 +779,9 @@ async def proxy_update(request: Request) -> Response:
         raw_body = upstream_response.content
         json_body = maybe_json_bytes(raw_body)
         outcome, error_message = classify_upload(upstream_response.status_code, json_body, raw_body)
+        sync_state: dict[str, Any] | None = None
+        if outcome == "success":
+            sync_state = update_sync_state(sync_uuid, payload_hash, cookie_count, site_count)
         record_sync_log(
             action="upload",
             sync_uuid=sync_uuid,
@@ -334,6 +799,11 @@ async def proxy_update(request: Request) -> Response:
             error_message=error_message,
             response_excerpt=build_response_excerpt("upload", outcome, raw_body, json_body),
         )
+        if outcome == "success" and sync_uuid and sync_state is not None:
+            try:
+                await send_sync_notification(sync_uuid, sync_state, request)
+            except Exception:
+                pass
         return Response(
             content=raw_body,
             status_code=upstream_response.status_code,
@@ -476,6 +946,20 @@ def fetch_summary_data() -> dict[str, Any]:
             LIMIT 10
             """
         ).fetchall()
+        sync_state_row = connection.execute(
+            """
+            SELECT COUNT(*) AS tracked_uuids, MAX(last_sync_at) AS last_sync_at
+            FROM sync_states
+            """
+        ).fetchone()
+        today_login_row = connection.execute(
+            """
+            SELECT COUNT(*) AS login_success_count
+            FROM auth_events
+            WHERE outcome = 'success' AND substr(occurred_at, 1, 10) = ?
+            """,
+            (today,),
+        ).fetchone()
 
     today_map = {
         ("upload", "success"): 0,
@@ -525,9 +1009,14 @@ def fetch_summary_data() -> dict[str, Any]:
             "upload_failed": today_map[("upload", "failed")],
             "download_success": today_map[("download", "success")],
             "download_failed": today_map[("download", "failed")],
+            "tracked_uuids": sync_state_row["tracked_uuids"] if sync_state_row else 0,
+            "last_sync_at": sync_state_row["last_sync_at"] if sync_state_row else None,
+            "today_login_success": today_login_row["login_success_count"] if today_login_row else 0,
         },
         "daily_stats": daily_stats,
         "uuid_summary": uuid_summary,
+        "notification_enabled": settings.wecom_enabled,
+        "auth_enabled": settings.dashboard_auth_enabled,
     }
 
 
@@ -569,6 +1058,20 @@ def fetch_recent_logs(
     return [dict(row) for row in rows]
 
 
+def fetch_recent_auth_events(limit: int = 8) -> list[dict[str, Any]]:
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT occurred_at, username, client_ip, user_agent, outcome
+            FROM auth_events
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
@@ -576,16 +1079,21 @@ async def dashboard(
     action: str | None = Query(default=None),
     outcome: str | None = Query(default=None),
     day: str | None = Query(default=None),
-    _: None = Depends(require_dashboard_auth),
 ) -> HTMLResponse:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+
     summary = fetch_summary_data()
     logs = fetch_recent_logs(sync_uuid=sync_uuid, action=action, outcome=outcome, day=day)
+    auth_events = fetch_recent_auth_events()
     return TEMPLATES.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "summary": summary,
             "logs": logs,
+            "auth_events": auth_events,
             "filters": {
                 "sync_uuid": sync_uuid or "",
                 "action": action or "",
@@ -594,6 +1102,9 @@ async def dashboard(
             },
             "target_url": settings.cookiecloud_target_url,
             "recent_log_limit": settings.recent_log_limit,
+            "notification_status": "Enabled" if settings.wecom_enabled else "Not configured",
+            "dashboard_username": request.session.get("username") or settings.dashboard_username or "Current session",
+            "logout_url": "/auth/logout",
         },
     )
 
@@ -602,8 +1113,11 @@ async def dashboard(
 async def log_detail(
     log_id: int,
     request: Request,
-    _: None = Depends(require_dashboard_auth),
-) -> HTMLResponse:
+) -> Response:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+
     with get_db_connection() as connection:
         row = connection.execute("SELECT * FROM sync_logs WHERE id = ?", (log_id,)).fetchone()
     if row is None:
@@ -612,16 +1126,18 @@ async def log_detail(
 
 
 @app.get("/api/summary")
-async def api_summary(_: None = Depends(require_dashboard_auth)) -> dict[str, Any]:
+async def api_summary(request: Request) -> dict[str, Any]:
+    require_api_auth(request)
     return fetch_summary_data()
 
 
 @app.get("/api/logs")
 async def api_logs(
+    request: Request,
     sync_uuid: str | None = Query(default=None),
     action: str | None = Query(default=None),
     outcome: str | None = Query(default=None),
     day: str | None = Query(default=None),
-    _: None = Depends(require_dashboard_auth),
 ) -> dict[str, Any]:
+    require_api_auth(request)
     return {"items": fetch_recent_logs(sync_uuid=sync_uuid, action=action, outcome=outcome, day=day)}
