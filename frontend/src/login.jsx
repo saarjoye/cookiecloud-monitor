@@ -207,6 +207,8 @@ function LoginHero() {
   );
 }
 
+document.documentElement.dataset.loginApp = "ready";
+
 createRoot(document.getElementById("login-root")).render(
   <React.StrictMode>
     <LoginHero />

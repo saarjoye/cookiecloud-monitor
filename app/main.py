@@ -12,7 +12,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -713,6 +713,18 @@ async def login_page(request: Request, next: str | None = Query(default="/dashbo
     )
 
 
+async def complete_login(request: Request, username: str, redirect_to: str) -> None:
+    request.session.clear()
+    request.session["authenticated"] = True
+    request.session["username"] = username
+    request.session["logged_in_at"] = now_local().isoformat(timespec="seconds")
+    record_auth_event(request, username, "success")
+    try:
+        await send_login_notification(request, username)
+    except Exception:
+        pass
+
+
 @app.post("/auth/login")
 async def login(request: Request, payload: LoginRequest = Body(...)) -> JSONResponse:
     redirect_to = sanitize_next_path(payload.next)
@@ -725,16 +737,39 @@ async def login(request: Request, payload: LoginRequest = Body(...)) -> JSONResp
         record_auth_event(request, payload.username, "failed")
         return JSONResponse(status_code=401, content={"message": "Invalid username or password"})
 
-    request.session.clear()
-    request.session["authenticated"] = True
-    request.session["username"] = payload.username
-    request.session["logged_in_at"] = now_local().isoformat(timespec="seconds")
-    record_auth_event(request, payload.username, "success")
-    try:
-        await send_login_notification(request, payload.username)
-    except Exception:
-        pass
+    await complete_login(request, payload.username, redirect_to)
     return JSONResponse({"ok": True, "redirect": redirect_to})
+
+
+@app.post("/auth/login-form")
+async def login_form(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/dashboard"),
+) -> Response:
+    redirect_to = sanitize_next_path(next)
+    if not settings.dashboard_auth_enabled:
+        return RedirectResponse(url=redirect_to, status_code=303)
+
+    username_matches = secrets.compare_digest(username, settings.dashboard_username)
+    password_matches = secrets.compare_digest(password, settings.dashboard_password)
+    if not (username_matches and password_matches):
+        record_auth_event(request, username, "failed")
+        return TEMPLATES.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "next_path": redirect_to,
+                "auth_enabled": settings.dashboard_auth_enabled,
+                "fallback_error": "Invalid username or password",
+                "fallback_username": username,
+            },
+            status_code=401,
+        )
+
+    await complete_login(request, username, redirect_to)
+    return RedirectResponse(url=redirect_to, status_code=303)
 
 
 @app.get("/auth/logout")

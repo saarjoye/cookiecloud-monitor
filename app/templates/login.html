@@ -4,10 +4,116 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CookieCloud Monitor Login</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/login-app/login.css') }}">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="{{ url_for('static', path='login-app/login.css') }}">
+    <style>
+        :root {
+            color: #172033;
+            background: #f5f1e9;
+            font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top, rgba(15, 118, 110, 0.14), transparent 28%),
+                linear-gradient(180deg, #fbfaf7 0%, #f4efe7 100%);
+        }
+
+        #login-root {
+            display: none;
+        }
+
+        html[data-login-app="ready"] #login-root {
+            display: block;
+        }
+
+        html[data-login-app="ready"] #login-fallback {
+            display: none;
+        }
+
+        .fallback-shell {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .fallback-card {
+            width: min(100%, 420px);
+            padding: 28px;
+            border-radius: 28px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(23, 32, 51, 0.08);
+            box-shadow: 0 20px 60px rgba(18, 24, 38, 0.12);
+        }
+
+        .fallback-card h1 {
+            margin: 0 0 10px;
+            font-size: 28px;
+        }
+
+        .fallback-card p {
+            margin: 0 0 20px;
+            color: #62708b;
+            line-height: 1.6;
+        }
+
+        .fallback-card form {
+            display: grid;
+            gap: 14px;
+        }
+
+        .fallback-card input {
+            height: 46px;
+            border-radius: 14px;
+            border: 1px solid rgba(23, 32, 51, 0.12);
+            background: #fff;
+            padding: 0 14px;
+            font: inherit;
+        }
+
+        .fallback-card button {
+            height: 48px;
+            border: 0;
+            border-radius: 999px;
+            background: linear-gradient(180deg, #1c263a 0%, #101722 100%);
+            color: #fff;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .fallback-error {
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: #fff1f0;
+            border: 1px solid #fecaca;
+            color: #b42318;
+            font-size: 14px;
+        }
+    </style>
 </head>
 <body>
+    <div id="login-fallback" class="fallback-shell">
+        <section class="fallback-card">
+            <h1>Sign in to dashboard</h1>
+            <p>If the enhanced login page does not load, you can still sign in here.</p>
+            {% if fallback_error %}
+            <div class="fallback-error">{{ fallback_error }}</div>
+            {% endif %}
+            <form method="post" action="/auth/login-form">
+                <input type="hidden" name="next" value="{{ next_path }}">
+                <input type="text" name="username" placeholder="Username" value="{{ fallback_username or '' }}" autocomplete="username" required>
+                <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+                <button type="submit">Sign In</button>
+            </form>
+        </section>
+    </div>
+
     <div id="login-root"></div>
-    <script type="module" src="{{ url_for('static', path='/login-app/login.js') }}"></script>
+    <script type="module" src="{{ url_for('static', path='login-app/login.js') }}"></script>
 </body>
 </html>
