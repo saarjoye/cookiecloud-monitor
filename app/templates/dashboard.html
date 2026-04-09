@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CookieCloud Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+    <main class="page">
+        <section class="hero">
+            <div>
+                <p class="eyebrow">CookieCloud Sync Monitor</p>
+                <h1>同步记录、失败排查、每日统计一页看完</h1>
+                <p class="hero-text">
+                    代理目标：<code>{{ target_url }}</code><br>
+                    今日日期：<code>{{ summary.today }}</code>
+                </p>
+            </div>
+            <div class="hero-note">
+                <strong>说明</strong>
+                <p>此页面只记录同步请求的元数据，不保存原始 Cookie 或 LocalStorage 明文内容。</p>
+            </div>
+        </section>
+
+        <section class="cards">
+            <article class="card">
+                <span class="card-label">今日总请求</span>
+                <strong>{{ summary.metrics.total_today }}</strong>
+                <small>上传与下载合计</small>
+            </article>
+            <article class="card">
+                <span class="card-label">今日成功</span>
+                <strong>{{ summary.metrics.success_today }}</strong>
+                <small>成功率 {{ summary.metrics.success_rate }}%</small>
+            </article>
+            <article class="card danger">
+                <span class="card-label">今日失败</span>
+                <strong>{{ summary.metrics.failed_today }}</strong>
+                <small>建议优先查看失败明细</small>
+            </article>
+            <article class="card">
+                <span class="card-label">上传 / 下载</span>
+                <strong>{{ summary.metrics.upload_success + summary.metrics.upload_failed }} / {{ summary.metrics.download_success + summary.metrics.download_failed }}</strong>
+                <small>按动作拆分统计</small>
+            </article>
+        </section>
+
+        <section class="panel">
+            <div class="panel-head">
+                <h2>今日动作分布</h2>
+            </div>
+            <div class="split-stats">
+                <div class="mini-stat">
+                    <span>上传成功</span>
+                    <strong>{{ summary.metrics.upload_success }}</strong>
+                </div>
+                <div class="mini-stat danger-soft">
+                    <span>上传失败</span>
+                    <strong>{{ summary.metrics.upload_failed }}</strong>
+                </div>
+                <div class="mini-stat">
+                    <span>下载成功</span>
+                    <strong>{{ summary.metrics.download_success }}</strong>
+                </div>
+                <div class="mini-stat danger-soft">
+                    <span>下载失败</span>
+                    <strong>{{ summary.metrics.download_failed }}</strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="grid">
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>近 7 天趋势</h2>
+                </div>
+                {% if summary.daily_stats %}
+                    <div class="trend-list">
+                        {% for item in summary.daily_stats %}
+                            <div class="trend-row">
+                                <div class="trend-meta">
+                                    <strong>{{ item.occurred_day }}</strong>
+                                    <span>成功 {{ item.success_count }} / 失败 {{ item.failed_count }}</span>
+                                </div>
+                                <div class="bar-shell">
+                                    <div class="bar-fill" style="width: {{ item.bar_pct }}%"></div>
+                                </div>
+                                <div class="trend-total">{{ item.total_count }}</div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty">暂无同步记录，先把浏览器插件地址改到本监控服务后再观察。</p>
+                {% endif %}
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>UUID 汇总</h2>
+                </div>
+                {% if summary.uuid_summary %}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>UUID</th>
+                                <th>成功</th>
+                                <th>失败</th>
+                                <th>最后一次</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in summary.uuid_summary %}
+                                <tr>
+                                    <td><code>{{ item.sync_uuid }}</code></td>
+                                    <td>{{ item.success_count }}</td>
+                                    <td>{{ item.failed_count }}</td>
+                                    <td>{{ item.last_seen_at }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p class="empty">还没有可汇总的 UUID 记录。</p>
+                {% endif %}
+            </section>
+        </section>
+
+        <section class="panel">
+            <div class="panel-head">
+                <h2>最近 {{ recent_log_limit }} 条同步明细</h2>
+            </div>
+            <form method="get" action="/dashboard" class="filters">
+                <label>
+                    UUID
+                    <input type="text" name="sync_uuid" value="{{ filters.sync_uuid }}" placeholder="按 UUID 过滤">
+                </label>
+                <label>
+                    动作
+                    <select name="action">
+                        <option value="">全部</option>
+                        <option value="upload" {% if filters.action == 'upload' %}selected{% endif %}>upload</option>
+                        <option value="download" {% if filters.action == 'download' %}selected{% endif %}>download</option>
+                    </select>
+                </label>
+                <label>
+                    结果
+                    <select name="outcome">
+                        <option value="">全部</option>
+                        <option value="success" {% if filters.outcome == 'success' %}selected{% endif %}>success</option>
+                        <option value="failed" {% if filters.outcome == 'failed' %}selected{% endif %}>failed</option>
+                    </select>
+                </label>
+                <label>
+                    日期
+                    <input type="date" name="day" value="{{ filters.day }}">
+                </label>
+                <button type="submit">筛选</button>
+            </form>
+
+            {% if logs %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>动作</th>
+                            <th>UUID</th>
+                            <th>结果</th>
+                            <th>状态码</th>
+                            <th>耗时</th>
+                            <th>客户端</th>
+                            <th>详情</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in logs %}
+                            <tr>
+                                <td>{{ log.occurred_at }}</td>
+                                <td><span class="tag">{{ log.action }}</span></td>
+                                <td><code>{{ log.sync_uuid or 'unknown' }}</code></td>
+                                <td>
+                                    <span class="status {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">
+                                        {{ log.outcome }}
+                                    </span>
+                                </td>
+                                <td>{{ log.http_status or '-' }}</td>
+                                <td>{{ log.duration_ms }} ms</td>
+                                <td>{{ log.client_ip or '-' }}</td>
+                                <td><a href="/logs/{{ log.id }}">查看</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="empty">当前筛选条件下没有记录。</p>
+            {% endif %}
+        </section>
+    </main>
+</body>
+</html>
