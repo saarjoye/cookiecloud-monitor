@@ -744,9 +744,15 @@ async def forward_to_cookiecloud(
     path: str,
     data: Any = None,
     params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     async with httpx.AsyncClient(timeout=15.0) as client:
-        return await client.request(method, build_target_url(path), data=data, params=params)
+        return await client.request(method, build_target_url(path), data=data, params=params, headers=headers)
+
+
+def filtered_request_headers(source_headers: Any) -> dict[str, str]:
+    allowed = {"content-type"}
+    return {key: value for key, value in source_headers.items() if key.lower() in allowed}
 
 
 @app.get("/", include_in_schema=False)
@@ -868,8 +874,13 @@ async def healthz() -> dict[str, str]:
 
 @app.post("/update")
 async def proxy_update(request: Request) -> Response:
-    form = await request.form()
-    form_map: dict[str, Any] = dict(form.multi_items())
+    raw_body = await request.body()
+    form_map: dict[str, Any] = {}
+    try:
+        form = await request.form()
+        form_map = dict(form.multi_items())
+    except Exception:
+        form_map = {}
     sync_uuid = extract_candidate(form_map, "uuid", "userUUID", "user_uuid", "id")
     payload_size, payload_hash = build_payload_digest(form_map)
     cookie_count, site_count = extract_sync_counts(form_map)
@@ -879,7 +890,8 @@ async def proxy_update(request: Request) -> Response:
         upstream_response = await forward_to_cookiecloud(
             method="POST",
             path="/update",
-            data=list(form.multi_items()),
+            data=raw_body,
+            headers=filtered_request_headers(request.headers),
         )
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         raw_body = upstream_response.content
@@ -916,7 +928,7 @@ async def proxy_update(request: Request) -> Response:
             media_type=upstream_response.headers.get("content-type"),
             headers=filtered_response_headers(upstream_response.headers),
         )
-    except httpx.HTTPError as exc:
+    except Exception as exc:
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         error_message = str(exc)
         record_sync_log(
@@ -936,7 +948,7 @@ async def proxy_update(request: Request) -> Response:
             error_message=error_message,
             response_excerpt=None,
         )
-        return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud 上游暂时不可用"})
+        return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud 上传转发失败"})
 
 
 @app.api_route("/get/{sync_uuid}", methods=["GET", "POST"])
@@ -945,11 +957,17 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
     form_map: dict[str, Any] = {}
     params: dict[str, Any] = dict(request.query_params)
     data: Any = None
+    headers: dict[str, str] | None = None
 
     if request.method == "POST":
-        form = await request.form()
-        form_map = dict(form.multi_items())
-        data = list(form.multi_items())
+        raw_body = await request.body()
+        data = raw_body
+        headers = filtered_request_headers(request.headers)
+        try:
+            form = await request.form()
+            form_map = dict(form.multi_items())
+        except Exception:
+            form_map = {}
 
     payload_size, payload_hash = build_payload_digest(form_map)
 
@@ -959,6 +977,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             path=f"/get/{sync_uuid}",
             data=data,
             params=params or None,
+            headers=headers,
         )
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         raw_body = upstream_response.content
@@ -987,7 +1006,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             media_type=upstream_response.headers.get("content-type"),
             headers=filtered_response_headers(upstream_response.headers),
         )
-    except httpx.HTTPError as exc:
+    except Exception as exc:
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         error_message = str(exc)
         record_sync_log(
@@ -1007,7 +1026,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             error_message=error_message,
             response_excerpt=None,
         )
-        return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud 上游暂时不可用"})
+        return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud 下载转发失败"})
 
 
 def fetch_summary_data() -> dict[str, Any]:
