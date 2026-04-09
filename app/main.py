@@ -742,12 +742,12 @@ async def forward_to_cookiecloud(
     *,
     method: str,
     path: str,
-    data: Any = None,
+    content: bytes | None = None,
     params: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     async with httpx.AsyncClient(timeout=15.0) as client:
-        return await client.request(method, build_target_url(path), data=data, params=params, headers=headers)
+        return await client.request(method, build_target_url(path), content=content, params=params, headers=headers)
 
 
 def filtered_request_headers(source_headers: Any) -> dict[str, str]:
@@ -890,7 +890,7 @@ async def proxy_update(request: Request) -> Response:
         upstream_response = await forward_to_cookiecloud(
             method="POST",
             path="/update",
-            data=raw_body,
+            content=raw_body,
             headers=filtered_request_headers(request.headers),
         )
         duration_ms = int((time.perf_counter() - start_time) * 1000)
@@ -957,11 +957,12 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
     form_map: dict[str, Any] = {}
     params: dict[str, Any] = dict(request.query_params)
     data: Any = None
+    content: bytes | None = None
     headers: dict[str, str] | None = None
 
     if request.method == "POST":
         raw_body = await request.body()
-        data = raw_body
+        content = raw_body
         headers = filtered_request_headers(request.headers)
         try:
             form = await request.form()
@@ -975,7 +976,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
         upstream_response = await forward_to_cookiecloud(
             method=request.method,
             path=f"/get/{sync_uuid}",
-            data=data,
+            content=content,
             params=params or None,
             headers=headers,
         )
