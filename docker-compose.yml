@@ -1,0 +1,28 @@
+services:
+  cookiecloud:
+    image: easychen/cookiecloud:latest
+    container_name: cookiecloud-app
+    restart: unless-stopped
+    volumes:
+      - ./data/cookiecloud:/data/api/data
+    expose:
+      - "8088"
+
+  monitor:
+    build:
+      context: .
+    container_name: cookiecloud-monitor
+    restart: unless-stopped
+    environment:
+      COOKIECLOUD_TARGET_URL: http://cookiecloud:8088
+      MONITOR_DB_PATH: /data/monitor.db
+      MONITOR_TIMEZONE: Asia/Shanghai
+      DASHBOARD_USERNAME: admin
+      DASHBOARD_PASSWORD: change-me
+      RECENT_LOG_LIMIT: 50
+    volumes:
+      - ./data/monitor:/data
+    ports:
+      - "8090:8090"
+    depends_on:
+      - cookiecloud
