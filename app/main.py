@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import Body, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -750,10 +750,24 @@ async def forward_to_cookiecloud(
 
 
 @app.get("/", include_in_schema=False)
-async def root(request: Request) -> RedirectResponse:
-    if settings.dashboard_auth_enabled and not is_authenticated(request):
-        return build_login_redirect("/dashboard")
-    return RedirectResponse(url="/dashboard", status_code=303)
+async def root(request: Request) -> Response:
+    accept = (request.headers.get("accept") or "").lower()
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    wants_html = "text/html" in accept or "mozilla" in user_agent
+
+    if not wants_html:
+        return PlainTextResponse("CookieCloud Monitor OK", status_code=200)
+
+    return TEMPLATES.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "dashboard_url": "/dashboard",
+            "settings_url": "/settings",
+            "health_url": "/healthz",
+            "target_url": settings.cookiecloud_target_url,
+        },
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)

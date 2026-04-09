@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CookieCloud Monitor</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main class="page page-shell page-narrow">
+        <section class="panel panel-surface">
+            <div class="panel-head panel-head-stack">
+                <div>
+                    <p class="section-kicker">连接入口</p>
+                    <h1>CookieCloud Monitor 已运行</h1>
+                </div>
+                <p class="subtle">浏览器插件可以直接把当前地址作为服务器地址，Monitor 会把同步请求转发到真正的 CookieCloud。</p>
+            </div>
+
+            <div class="help-grid">
+                <article class="help-card">
+                    <strong>插件服务器地址</strong>
+                    <p>把当前 Monitor 地址填到 CookieCloud 浏览器插件的“服务器地址”里，而不是填原始 CookieCloud 地址。</p>
+                </article>
+                <article class="help-card">
+                    <strong>当前上游地址</strong>
+                    <p><code>{{ target_url }}</code></p>
+                </article>
+                <article class="help-card">
+                    <strong>状态检查</strong>
+                    <p>接口探活可访问 <code>{{ health_url }}</code>，仪表盘与配置页入口见下方按钮。</p>
+                </article>
+            </div>
+
+            <div class="action-row">
+                <a class="button" href="{{ dashboard_url }}">打开仪表盘</a>
+                <a class="button button-ghost" href="{{ settings_url }}">系统设置</a>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
