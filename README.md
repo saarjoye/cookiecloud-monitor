@@ -71,6 +71,12 @@ http://YOUR_SERVER_IP:8090/dashboard
 
 If dashboard credentials are configured, unauthenticated users are redirected to `/login`.
 
+After the container starts, you can manage the upstream CookieCloud address, dashboard account, timezone, recent log count, and WeCom push settings from:
+
+```text
+http://YOUR_SERVER_IP:8090/settings
+```
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -106,6 +112,7 @@ CK count tracking is best-effort. If CookieCloud sends only encrypted payloads, 
 ## API Endpoints
 
 - `GET /dashboard` - dashboard page
+- `GET /settings` - web settings page
 - `GET /login` - React login page
 - `POST /auth/login` - session login
 - `POST /auth/logout` - session logout

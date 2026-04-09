@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CookieCloud Monitor Login</title>
+    <title>登录 CookieCloud Monitor</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="{{ url_for('static', path='login-app/login.css') }}">
     <style>
@@ -99,16 +99,16 @@
 <body>
     <div id="login-fallback" class="fallback-shell">
         <section class="fallback-card">
-            <h1>Sign in to dashboard</h1>
-            <p>If the enhanced login page does not load, you can still sign in here.</p>
+            <h1>登录监控面板</h1>
+            <p>如果增强版登录页没有正常加载，你仍然可以在这里完成登录。</p>
             {% if fallback_error %}
             <div class="fallback-error">{{ fallback_error }}</div>
             {% endif %}
             <form method="post" action="/auth/login-form">
                 <input type="hidden" name="next" value="{{ next_path }}">
-                <input type="text" name="username" placeholder="Username" value="{{ fallback_username or '' }}" autocomplete="username" required>
-                <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
-                <button type="submit">Sign In</button>
+                <input type="text" name="username" placeholder="登录账号" value="{{ fallback_username or '' }}" autocomplete="username" required>
+                <input type="password" name="password" placeholder="登录密码" autocomplete="current-password" required>
+                <button type="submit">进入控制台</button>
             </form>
         </section>
     </div>

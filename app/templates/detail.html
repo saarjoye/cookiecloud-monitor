@@ -4,17 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>同步详情 #{{ log.id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
 </head>
 <body>
     <main class="page page-shell page-narrow">
         <section class="topbar panel-surface">
             <div class="topbar-copy">
-                <p class="eyebrow">Log Detail</p>
+                <p class="eyebrow">日志详情</p>
                 <h1>同步详情 #{{ log.id }}</h1>
-                <p class="subtle">
-                    用于查看单条请求的动作、结果、耗时、来源和响应摘录。
-                </p>
+                <p class="subtle">这里展示单次同步请求的元数据、耗时、错误信息与响应摘录。</p>
             </div>
             <div class="topbar-tools">
                 <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
@@ -25,10 +24,8 @@
             <div class="detail-highlight">
                 <span class="metric-label">结果</span>
                 <div class="detail-highlight-row">
-                    <strong>{{ log.outcome }}</strong>
-                    <span class="status {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">
-                        {{ log.action }}
-                    </span>
+                    <strong>{{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}</strong>
+                    <span class="status {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">{{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}</span>
                 </div>
                 <small>记录时间 {{ log.occurred_at }}</small>
             </div>
@@ -47,7 +44,7 @@
         <section class="panel panel-surface">
             <div class="panel-head">
                 <div>
-                    <p class="section-kicker">Request Metadata</p>
+                    <p class="section-kicker">请求信息</p>
                     <h2>请求元数据</h2>
                 </div>
             </div>
@@ -55,15 +52,15 @@
                 <table class="detail-table">
                     <tbody>
                         <tr><th>时间</th><td>{{ log.occurred_at }}</td></tr>
-                        <tr><th>动作</th><td>{{ log.action }}</td></tr>
+                        <tr><th>动作</th><td>{{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}</td></tr>
                         <tr><th>UUID</th><td><code>{{ log.sync_uuid or 'unknown' }}</code></td></tr>
-                        <tr><th>结果</th><td>{{ log.outcome }}</td></tr>
+                        <tr><th>结果</th><td>{{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}</td></tr>
                         <tr><th>HTTP 状态码</th><td>{{ log.http_status or '-' }}</td></tr>
                         <tr><th>请求方法</th><td>{{ log.request_method }}</td></tr>
                         <tr><th>请求路径</th><td><code>{{ log.request_path }}</code></td></tr>
-                        <tr><th>Query</th><td><code>{{ log.query_string or '-' }}</code></td></tr>
+                        <tr><th>查询参数</th><td><code>{{ log.query_string or '-' }}</code></td></tr>
                         <tr><th>客户端 IP</th><td>{{ log.client_ip or '-' }}</td></tr>
-                        <tr><th>User-Agent</th><td>{{ log.user_agent or '-' }}</td></tr>
+                        <tr><th>浏览器标识</th><td>{{ log.user_agent or '-' }}</td></tr>
                         <tr><th>耗时</th><td>{{ log.duration_ms }} ms</td></tr>
                         <tr><th>请求载荷大小</th><td>{{ log.payload_size }} bytes</td></tr>
                         <tr><th>请求载荷摘要</th><td><code>{{ log.payload_hash or '-' }}</code></td></tr>
@@ -77,7 +74,7 @@
         <section class="panel panel-surface">
             <div class="panel-head">
                 <div>
-                    <p class="section-kicker">Response Excerpt</p>
+                    <p class="section-kicker">响应内容</p>
                     <h2>响应摘录</h2>
                 </div>
             </div>

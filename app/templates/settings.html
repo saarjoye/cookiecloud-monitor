@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统设置 - CookieCloud Monitor</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+    <main class="page page-shell page-narrow">
+        <section class="topbar panel-surface">
+            <div class="topbar-copy">
+                <p class="eyebrow">系统设置</p>
+                <h1>系统设置</h1>
+                <p class="subtle">在这里配置 CookieCloud 上游地址、监控参数、登录账号和企业微信应用推送。</p>
+            </div>
+            <div class="topbar-tools">
+                <div class="tool-chip">
+                    <span class="tool-chip-label">通知状态</span>
+                    <strong>{{ notification_status }}</strong>
+                </div>
+                <div class="tool-chip">
+                    <span class="tool-chip-label">通知目标</span>
+                    <strong>{{ notification_target }}</strong>
+                </div>
+                <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
+                <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
+            </div>
+        </section>
+
+        {% if message %}
+        <section class="banner banner-success">{{ message }}</section>
+        {% endif %}
+        {% if error %}
+        <section class="banner banner-error">{{ error }}</section>
+        {% endif %}
+
+        <section class="panel panel-surface">
+            <div class="panel-head">
+                <div>
+                    <p class="section-kicker">工作方式</p>
+                    <h2>监听方式说明</h2>
+                </div>
+            </div>
+            <div class="help-grid">
+                <article class="help-card">
+                    <strong>当前方案是前置代理模式</strong>
+                    <p>浏览器插件请求先到 Monitor，再由 Monitor 转发到真正的 CookieCloud。</p>
+                </article>
+                <article class="help-card">
+                    <strong>如果插件直接请求原始 CookieCloud</strong>
+                    <p>当前监控服务无法看到同步动作，也就不会生成日志、统计和推送。</p>
+                </article>
+                <article class="help-card">
+                    <strong>你可以这样部署</strong>
+                    <p>插件直接填当前 Monitor 地址，或者让原有域名先反代到 Monitor，再转发给 CookieCloud。</p>
+                </article>
+            </div>
+        </section>
+
+        <form method="post" action="/settings" class="settings-stack">
+            <section class="panel panel-surface">
+                <div class="panel-head">
+                    <div>
+                        <p class="section-kicker">上游转发</p>
+                        <h2>CookieCloud 上游配置</h2>
+                    </div>
+                </div>
+                <div class="settings-grid">
+                    <label class="field">
+                        <span>CookieCloud 上游地址</span>
+                        <input type="text" name="cookiecloud_target_url" value="{{ settings_form.cookiecloud_target_url }}" placeholder="http://cookiecloud:8088" required>
+                        <small>真正的 CookieCloud 服务地址，Monitor 会把 `/update` 和 `/get/{uuid}` 转发到这里。</small>
+                    </label>
+                    <label class="field">
+                        <span>时区</span>
+                        <input type="text" name="timezone_name" value="{{ settings_form.timezone_name }}" placeholder="Asia/Shanghai">
+                        <small>用于页面显示与按日统计。</small>
+                    </label>
+                    <label class="field">
+                        <span>最近日志条数</span>
+                        <input type="number" name="recent_log_limit" value="{{ settings_form.recent_log_limit }}" min="10" step="1">
+                        <small>仪表盘最近日志表格展示条数。</small>
+                    </label>
+                </div>
+            </section>
+
+            <section class="panel panel-surface">
+                <div class="panel-head">
+                    <div>
+                        <p class="section-kicker">面板登录</p>
+                        <h2>控制台登录配置</h2>
+                    </div>
+                </div>
+                <div class="settings-grid">
+                    <label class="field">
+                        <span>登录账号</span>
+                        <input type="text" name="dashboard_username" value="{{ settings_form.dashboard_username }}" placeholder="admin">
+                        <small>留空时可关闭登录保护。</small>
+                    </label>
+                    <label class="field">
+                        <span>登录密码</span>
+                        <input type="password" name="dashboard_password" value="" placeholder="不填写则保持当前密码">
+                        <small>如果不填写，将保留当前已保存的密码。</small>
+                    </label>
+                </div>
+            </section>
+
+            <section class="panel panel-surface">
+                <div class="panel-head">
+                    <div>
+                        <p class="section-kicker">通知推送</p>
+                        <h2>企业微信应用推送</h2>
+                    </div>
+                </div>
+                <div class="settings-grid">
+                    <label class="field">
+                        <span>企业 ID</span>
+                        <input type="text" name="wecom_corp_id" value="{{ settings_form.wecom_corp_id }}">
+                    </label>
+                    <label class="field">
+                        <span>应用 Agent ID</span>
+                        <input type="text" name="wecom_agent_id" value="{{ settings_form.wecom_agent_id }}">
+                    </label>
+                    <label class="field field-full">
+                        <span>应用 Secret</span>
+                        <input type="password" name="wecom_secret" value="{{ settings_form.wecom_secret }}">
+                    </label>
+                    <label class="field">
+                        <span>接收成员</span>
+                        <input type="text" name="wecom_to_user" value="{{ settings_form.wecom_to_user }}" placeholder="userid1|userid2">
+                    </label>
+                    <label class="field">
+                        <span>接收部门</span>
+                        <input type="text" name="wecom_to_party" value="{{ settings_form.wecom_to_party }}" placeholder="1|2">
+                    </label>
+                    <label class="field">
+                        <span>接收标签</span>
+                        <input type="text" name="wecom_to_tag" value="{{ settings_form.wecom_to_tag }}" placeholder="3|8">
+                    </label>
+                </div>
+                <p class="helper-text">只有企业微信应用参数完整，且至少配置了成员、部门或标签之一，通知才会真正发送。</p>
+            </section>
+
+            <div class="action-row">
+                <button class="button" type="submit">保存配置</button>
+            </div>
+        </form>
+
+        <section class="panel panel-surface">
+            <div class="panel-head">
+                <div>
+                    <p class="section-kicker">连通性验证</p>
+                    <h2>测试通知</h2>
+                </div>
+            </div>
+            <p class="subtle">保存配置后，可以直接发送一条企业微信测试通知，验证应用和接收对象是否配置正确。</p>
+            <form method="post" action="/settings/test-notification" class="action-row">
+                <button class="button" type="submit">发送测试通知</button>
+            </form>
+        </section>
+
+        <section class="panel panel-surface">
+            <div class="panel-head">
+                <div>
+                    <p class="section-kicker">通知预览</p>
+                    <h2>企业微信消息样式参考</h2>
+                </div>
+            </div>
+            <div class="preview-grid">
+                <article class="preview-card">
+                    <span class="preview-tag">首次同步</span>
+                    <h3>CookieCloud 首次同步提醒</h3>
+                    <pre># CookieCloud 首次同步提醒
+> UUID：`your-uuid`
+> 时间：`2026-04-09T12:30:00`
+> 来源 IP：`192.168.1.100`
+> 当前 CK 数：`28`
+> 站点数：`6`</pre>
+                </article>
+                <article class="preview-card">
+                    <span class="preview-tag">CK 增减</span>
+                    <h3>CookieCloud CK 数量变化</h3>
+                    <pre># CookieCloud CK 数量增加
+> UUID：`your-uuid`
+> 当前 CK 数：`36`
+> 变更前 CK 数：`28`
+> 变化值：`+8`</pre>
+                </article>
+                <article class="preview-card">
+                    <span class="preview-tag">登录成功</span>
+                    <h3>CookieCloud 控制台登录提醒</h3>
+                    <pre># CookieCloud 控制台登录提醒
+> 登录账号：`admin`
+> 时间：`2026-04-09T12:36:00`
+> IP：`192.168.1.30`
+> UA：`Mozilla/5.0 ...`</pre>
+                </article>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

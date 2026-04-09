@@ -24,7 +24,7 @@ APP_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(APP_ROOT / "templates"))
 
 
-@dataclass(frozen=True)
+@dataclass
 class Settings:
     cookiecloud_target_url: str
     db_path: Path
@@ -146,6 +146,14 @@ CREATE INDEX IF NOT EXISTS idx_auth_events_occurred_at
 ON auth_events (occurred_at DESC);
 """
 
+CREATE_APP_SETTINGS_SQL = """
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1)
@@ -154,6 +162,20 @@ class LoginRequest(BaseModel):
 
 
 WECOM_TOKEN_CACHE: dict[str, Any] = {"access_token": None, "expires_at": 0.0}
+
+MANAGED_SETTING_KEYS = {
+    "cookiecloud_target_url",
+    "timezone_name",
+    "dashboard_username",
+    "dashboard_password",
+    "recent_log_limit",
+    "wecom_corp_id",
+    "wecom_agent_id",
+    "wecom_secret",
+    "wecom_to_user",
+    "wecom_to_party",
+    "wecom_to_tag",
+}
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -170,16 +192,100 @@ def init_db() -> None:
         connection.execute(CREATE_SYNC_STATES_SQL)
         connection.execute(CREATE_AUTH_EVENTS_SQL)
         connection.execute(CREATE_AUTH_EVENTS_INDEX_SQL)
+        connection.execute(CREATE_APP_SETTINGS_SQL)
         connection.commit()
 
 
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    refresh_runtime_settings()
 
 
 def now_local() -> datetime:
     return datetime.now(settings.timezone)
+
+
+def load_app_settings_map() -> dict[str, str]:
+    with get_db_connection() as connection:
+        rows = connection.execute("SELECT key, value FROM app_settings").fetchall()
+    return {str(row["key"]): str(row["value"]) for row in rows}
+
+
+def refresh_runtime_settings() -> None:
+    stored = load_app_settings_map()
+    for key in MANAGED_SETTING_KEYS:
+        if key not in stored:
+            continue
+        value = stored[key]
+        if key == "cookiecloud_target_url":
+            settings.cookiecloud_target_url = value.rstrip("/") or settings.cookiecloud_target_url
+        elif key == "timezone_name":
+            settings.timezone_name = value or settings.timezone_name
+        elif key == "recent_log_limit":
+            try:
+                settings.recent_log_limit = max(int(value), 10)
+            except ValueError:
+                continue
+        else:
+            setattr(settings, key, value)
+
+
+def save_runtime_settings(values: dict[str, str]) -> None:
+    timestamp = now_local().isoformat(timespec="seconds")
+    with get_db_connection() as connection:
+        for key, value in values.items():
+            if key not in MANAGED_SETTING_KEYS:
+                continue
+            connection.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (key, value, timestamp),
+            )
+        connection.commit()
+    refresh_runtime_settings()
+
+
+def managed_settings_snapshot() -> dict[str, str]:
+    return {
+        "cookiecloud_target_url": settings.cookiecloud_target_url,
+        "timezone_name": settings.timezone_name,
+        "dashboard_username": settings.dashboard_username,
+        "dashboard_password": settings.dashboard_password,
+        "recent_log_limit": str(settings.recent_log_limit),
+        "wecom_corp_id": settings.wecom_corp_id,
+        "wecom_agent_id": settings.wecom_agent_id,
+        "wecom_secret": settings.wecom_secret,
+        "wecom_to_user": settings.wecom_to_user,
+        "wecom_to_party": settings.wecom_to_party,
+        "wecom_to_tag": settings.wecom_to_tag,
+    }
+
+
+def notification_target_summary() -> str:
+    targets = []
+    if settings.wecom_to_user:
+        targets.append(f"成员 {settings.wecom_to_user}")
+    if settings.wecom_to_party:
+        targets.append(f"部门 {settings.wecom_to_party}")
+    if settings.wecom_to_tag:
+        targets.append(f"标签 {settings.wecom_to_tag}")
+    return " / ".join(targets) if targets else "未配置接收对象"
+
+
+def runtime_status_summary() -> dict[str, str]:
+    return {
+        "notification_status": "已启用" if settings.wecom_enabled else "未配置",
+        "notification_target": notification_target_summary(),
+        "proxy_mode": "前置代理模式",
+        "proxy_hint": "请让浏览器插件请求当前 Monitor 地址，或由反向代理先转到 Monitor，再转发到真正的 CookieCloud。",
+        "target_url": settings.cookiecloud_target_url,
+    }
 
 
 def normalize_form_value(value: Any) -> str:
@@ -311,7 +417,7 @@ def is_authenticated(request: Request) -> bool:
 
 def require_api_auth(request: Request) -> None:
     if not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(status_code=401, detail="请先登录")
 
 
 def record_auth_event(request: Request, username: str, outcome: str) -> None:
@@ -467,7 +573,7 @@ async def get_wecom_access_token() -> str:
         payload = response.json()
 
     if payload.get("errcode") != 0:
-        raise RuntimeError(payload.get("errmsg") or "Unable to fetch WeCom access token")
+        raise RuntimeError(payload.get("errmsg") or "获取企业微信 access_token 失败")
 
     expires_in = int(payload.get("expires_in", 7200))
     token = str(payload["access_token"])
@@ -510,9 +616,8 @@ async def send_wecom_markdown(title: str, body_lines: list[str]) -> None:
         payload = response.json()
 
     if payload.get("errcode") != 0:
-        raise RuntimeError(payload.get("errmsg") or "Unable to send WeCom message")
+        raise RuntimeError(payload.get("errmsg") or "发送企业微信消息失败")
 
-"""
 
 async def send_login_notification(request: Request, username: str) -> None:
     if not settings.wecom_enabled:
@@ -520,7 +625,7 @@ async def send_login_notification(request: Request, username: str) -> None:
     await send_wecom_markdown(
         "CookieCloud 控制台登录提醒",
         [
-            f"> 账号：`{username}`",
+            f"> 登录账号：`{username}`",
             f"> 时间：`{now_local().isoformat(timespec='seconds')}`",
             f"> IP：`{client_ip_from_request(request) or '-'}`",
             f"> UA：`{(request.headers.get('user-agent') or '-')[:180]}`",
@@ -558,53 +663,19 @@ async def send_sync_notification(sync_uuid: str, state: dict[str, Any], request:
         body_lines.append(f"> 变化值：`{sign}{state['cookie_delta']}`")
 
     await send_wecom_markdown(title, body_lines)
-"""
 
 
-async def send_login_notification(request: Request, username: str) -> None:
-    if not settings.wecom_enabled:
-        return
+async def send_test_notification(request: Request) -> None:
     await send_wecom_markdown(
-        "CookieCloud Console Login Alert",
+        "CookieCloud 测试通知",
         [
-            f"> User: `{username}`",
-            f"> Time: `{now_local().isoformat(timespec='seconds')}`",
-            f"> IP: `{client_ip_from_request(request) or '-'}`",
-            f"> UA: `{(request.headers.get('user-agent') or '-')[:180]}`",
+            "> 这是一条来自 CookieCloud Monitor 的测试消息。",
+            f"> 时间：`{now_local().isoformat(timespec='seconds')}`",
+            f"> 上游地址：`{settings.cookiecloud_target_url}`",
+            f"> 接收对象：`{notification_target_summary()}`",
+            f"> 触发人：`{request.session.get('username') or settings.dashboard_username or 'unknown'}`",
         ],
     )
-
-
-async def send_sync_notification(sync_uuid: str, state: dict[str, Any], request: Request) -> None:
-    if not settings.wecom_enabled:
-        return
-
-    title = ""
-    if state["is_first_sync"]:
-        title = "CookieCloud First Sync Alert"
-    elif state["cookie_delta"] is not None and state["cookie_delta"] > 0:
-        title = "CookieCloud CK Count Increased"
-    elif state["cookie_delta"] is not None and state["cookie_delta"] < 0:
-        title = "CookieCloud CK Count Decreased"
-    elif state["payload_changed"]:
-        title = "CookieCloud Sync Payload Updated"
-    else:
-        return
-
-    body_lines = [
-        f"> UUID: `{sync_uuid}`",
-        f"> Time: `{now_local().isoformat(timespec='seconds')}`",
-        f"> Source IP: `{client_ip_from_request(request) or '-'}`",
-        f"> Current CK Count: `{state['cookie_count'] if state['cookie_count'] is not None else '-'}`",
-        f"> Site Count: `{state['site_count'] if state['site_count'] is not None else '-'}`",
-    ]
-    if state["previous_cookie_count"] is not None:
-        body_lines.append(f"> Previous CK Count: `{state['previous_cookie_count']}`")
-    if state["cookie_delta"] is not None:
-        sign = "+" if state["cookie_delta"] > 0 else ""
-        body_lines.append(f"> Delta: `{sign}{state['cookie_delta']}`")
-
-    await send_wecom_markdown(title, body_lines)
 
 
 def record_sync_log(
@@ -657,20 +728,6 @@ def record_sync_log(
             ),
         )
         connection.commit()
-
-"""
-
-def require_dashboard_auth(credentials: HTTPBasicCredentials | None = Depends(security)) -> None:
-    if not settings.dashboard_username and not settings.dashboard_password:
-        return
-    if credentials is None:
-        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
-    username_matches = secrets.compare_digest(credentials.username, settings.dashboard_username)
-    password_matches = secrets.compare_digest(credentials.password, settings.dashboard_password)
-    if not (username_matches and password_matches):
-        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
-"""
-
 
 def require_page_auth(request: Request) -> RedirectResponse | None:
     if is_authenticated(request):
@@ -735,7 +792,7 @@ async def login(request: Request, payload: LoginRequest = Body(...)) -> JSONResp
     password_matches = secrets.compare_digest(payload.password, settings.dashboard_password)
     if not (username_matches and password_matches):
         record_auth_event(request, payload.username, "failed")
-        return JSONResponse(status_code=401, content={"message": "Invalid username or password"})
+        return JSONResponse(status_code=401, content={"message": "账号或密码错误"})
 
     await complete_login(request, payload.username, redirect_to)
     return JSONResponse({"ok": True, "redirect": redirect_to})
@@ -762,7 +819,7 @@ async def login_form(
                 "request": request,
                 "next_path": redirect_to,
                 "auth_enabled": settings.dashboard_auth_enabled,
-                "fallback_error": "Invalid username or password",
+                "fallback_error": "账号或密码错误",
                 "fallback_username": username,
             },
             status_code=401,
@@ -865,7 +922,7 @@ async def proxy_update(request: Request) -> Response:
             error_message=error_message,
             response_excerpt=None,
         )
-        return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud target is unavailable"})
+        return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud 上游暂时不可用"})
 
 
 @app.api_route("/get/{sync_uuid}", methods=["GET", "POST"])
@@ -936,7 +993,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             error_message=error_message,
             response_excerpt=None,
         )
-        return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud target is unavailable"})
+        return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud 上游暂时不可用"})
 
 
 def fetch_summary_data() -> dict[str, Any]:
@@ -1107,6 +1164,28 @@ def fetch_recent_auth_events(limit: int = 8) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def build_settings_page_context(
+    request: Request,
+    *,
+    message: str = "",
+    error: str = "",
+    form_overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    settings_form = managed_settings_snapshot()
+    if form_overrides:
+        settings_form.update({key: value for key, value in form_overrides.items() if key in settings_form})
+    return {
+        "request": request,
+        "settings_form": settings_form,
+        "message": message,
+        "error": error,
+        "dashboard_username": request.session.get("username") or settings.dashboard_username or "当前会话",
+        "notification_status": "已启用" if settings.wecom_enabled else "未配置",
+        "notification_target": notification_target_summary(),
+        "logout_url": "/auth/logout",
+    }
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
@@ -1122,6 +1201,7 @@ async def dashboard(
     summary = fetch_summary_data()
     logs = fetch_recent_logs(sync_uuid=sync_uuid, action=action, outcome=outcome, day=day)
     auth_events = fetch_recent_auth_events()
+    status = runtime_status_summary()
     return TEMPLATES.TemplateResponse(
         "dashboard.html",
         {
@@ -1135,13 +1215,144 @@ async def dashboard(
                 "outcome": outcome or "",
                 "day": day or "",
             },
-            "target_url": settings.cookiecloud_target_url,
+            "target_url": status["target_url"],
             "recent_log_limit": settings.recent_log_limit,
-            "notification_status": "Enabled" if settings.wecom_enabled else "Not configured",
-            "dashboard_username": request.session.get("username") or settings.dashboard_username or "Current session",
+            "notification_status": status["notification_status"],
+            "notification_target": status["notification_target"],
+            "proxy_mode": status["proxy_mode"],
+            "proxy_hint": status["proxy_hint"],
+            "dashboard_username": request.session.get("username") or settings.dashboard_username or "当前会话",
             "logout_url": "/auth/logout",
+            "settings_url": "/settings",
         },
     )
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(
+    request: Request,
+    message: str = Query(default=""),
+    error: str = Query(default=""),
+) -> Response:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+    return TEMPLATES.TemplateResponse("settings.html", build_settings_page_context(request, message=message, error=error))
+
+
+@app.post("/settings")
+async def update_settings(
+    request: Request,
+    cookiecloud_target_url: str = Form(...),
+    timezone_name: str = Form("Asia/Shanghai"),
+    recent_log_limit: str = Form("50"),
+    dashboard_username: str = Form(""),
+    dashboard_password: str = Form(""),
+    wecom_corp_id: str = Form(""),
+    wecom_agent_id: str = Form(""),
+    wecom_secret: str = Form(""),
+    wecom_to_user: str = Form(""),
+    wecom_to_party: str = Form(""),
+    wecom_to_tag: str = Form(""),
+) -> Response:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+
+    cleaned_values = {
+        "cookiecloud_target_url": cookiecloud_target_url.strip().rstrip("/"),
+        "timezone_name": timezone_name.strip() or "Asia/Shanghai",
+        "recent_log_limit": recent_log_limit.strip() or "50",
+        "dashboard_username": dashboard_username.strip(),
+        "dashboard_password": dashboard_password.strip(),
+        "wecom_corp_id": wecom_corp_id.strip(),
+        "wecom_agent_id": wecom_agent_id.strip(),
+        "wecom_secret": wecom_secret.strip(),
+        "wecom_to_user": wecom_to_user.strip(),
+        "wecom_to_party": wecom_to_party.strip(),
+        "wecom_to_tag": wecom_to_tag.strip(),
+    }
+    form_values = {**cleaned_values, "dashboard_password": ""}
+
+    if not cleaned_values["cookiecloud_target_url"].startswith(("http://", "https://")):
+        return TEMPLATES.TemplateResponse(
+            "settings.html",
+            build_settings_page_context(
+                request,
+                error="CookieCloud 上游地址必须以 http:// 或 https:// 开头。",
+                form_overrides=form_values,
+            ),
+            status_code=400,
+        )
+
+    try:
+        ZoneInfo(cleaned_values["timezone_name"])
+    except Exception:
+        return TEMPLATES.TemplateResponse(
+            "settings.html",
+            build_settings_page_context(
+                request,
+                error="时区格式无效，请填写例如 Asia/Shanghai。",
+                form_overrides=form_values,
+            ),
+            status_code=400,
+        )
+
+    try:
+        cleaned_values["recent_log_limit"] = str(max(int(cleaned_values["recent_log_limit"]), 10))
+        form_values["recent_log_limit"] = cleaned_values["recent_log_limit"]
+    except ValueError:
+        return TEMPLATES.TemplateResponse(
+            "settings.html",
+            build_settings_page_context(request, error="最近日志条数必须是数字。", form_overrides=form_values),
+            status_code=400,
+        )
+
+    if cleaned_values["dashboard_username"] and not (cleaned_values["dashboard_password"] or settings.dashboard_password):
+        return TEMPLATES.TemplateResponse(
+            "settings.html",
+            build_settings_page_context(
+                request,
+                error="开启登录保护时必须同时设置登录密码。",
+                form_overrides=form_values,
+            ),
+            status_code=400,
+        )
+
+    if cleaned_values["dashboard_password"] and not cleaned_values["dashboard_username"]:
+        return TEMPLATES.TemplateResponse(
+            "settings.html",
+            build_settings_page_context(
+                request,
+                error="填写登录密码前，请先填写登录账号。",
+                form_overrides=form_values,
+            ),
+            status_code=400,
+        )
+
+    if not cleaned_values["dashboard_username"]:
+        cleaned_values["dashboard_password"] = ""
+    elif not cleaned_values["dashboard_password"]:
+        cleaned_values["dashboard_password"] = settings.dashboard_password
+
+    save_runtime_settings(cleaned_values)
+    return RedirectResponse(url="/settings?message=配置已保存", status_code=303)
+
+
+@app.post("/settings/test-notification")
+async def test_notification(request: Request) -> Response:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+
+    if not settings.wecom_enabled:
+        return RedirectResponse(url="/settings?error=企业微信应用参数未完整配置", status_code=303)
+
+    try:
+        await send_test_notification(request)
+    except Exception as exc:
+        return RedirectResponse(url=f"/settings?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(url="/settings?message=测试通知已发送", status_code=303)
 
 
 @app.get("/logs/{log_id}", response_class=HTMLResponse)
@@ -1156,7 +1367,7 @@ async def log_detail(
     with get_db_connection() as connection:
         row = connection.execute("SELECT * FROM sync_logs WHERE id = ?", (log_id,)).fetchone()
     if row is None:
-        raise HTTPException(status_code=404, detail="Log not found")
+        raise HTTPException(status_code=404, detail="日志不存在")
     return TEMPLATES.TemplateResponse("detail.html", {"request": request, "log": dict(row)})
 
 

@@ -44,7 +44,7 @@ function ReviewBadge() {
         </div>
         <div className="text-sm text-slate-700">
           <span className="font-semibold text-slate-900">1,020+ Reviews</span>
-          <span className="ml-2 opacity-80">by distributed operators</span>
+          <span className="ml-2 opacity-80">来自真实运维团队</span>
         </div>
       </div>
     </div>
@@ -69,12 +69,12 @@ function LoginHero() {
       });
       const payload = await response.json();
       if (!response.ok) {
-        setError(payload.message || "Sign in failed");
+        setError(payload.message || "登录失败，请检查账号和密码");
         return;
       }
       window.location.href = payload.redirect || nextPath;
     } catch (requestError) {
-      setError("Network unavailable, please retry.");
+      setError("网络暂时不可用，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
@@ -99,7 +99,7 @@ function LoginHero() {
           <div className="flex flex-col gap-8">
             <motion.div custom={0} initial="hidden" animate="show" variants={itemVariants}>
               <span className="inline-flex rounded-full border border-slate-200/70 bg-white/75 px-4 py-2 text-xs font-medium uppercase tracking-[0.28em] text-slate-600 shadow-[0px_12px_35px_-24px_rgba(15,23,42,0.4)] backdrop-blur-md">
-                CookieCloud Command
+                CookieCloud Monitor
               </span>
             </motion.div>
 
@@ -124,8 +124,7 @@ function LoginHero() {
               variants={itemVariants}
               className="max-w-[554px] text-[18px] leading-8 text-[#373a46]/80"
             >
-              Securely monitor CookieCloud sync activity, surface operational changes, and notify your enterprise team
-              the moment credentials arrive, drift, or trigger a fresh login.
+              统一查看 CookieCloud 每天的同步状态、CK 变化、失败原因和登录行为，并在关键事件发生时及时推送到你的企业微信应用。
             </motion.p>
 
             <motion.div custom={0.24} initial="hidden" animate="show" variants={itemVariants}>
@@ -143,10 +142,10 @@ function LoginHero() {
             <div className="rounded-[32px] bg-white/88 p-6 shadow-[inset_0px_1px_0px_rgba(255,255,255,0.7)]">
               <div className="mb-8 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-[0.26em] text-slate-500">Secure Access</p>
-                  <h2 className="mt-3 text-[32px] font-medium tracking-[-0.04em] text-slate-950">Sign in to dashboard</h2>
+                  <p className="text-xs font-medium uppercase tracking-[0.26em] text-slate-500">安全登录</p>
+                  <h2 className="mt-3 text-[32px] font-medium tracking-[-0.04em] text-slate-950">进入监控控制台</h2>
                 </div>
-                <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-medium text-white">Session Login</span>
+                <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-medium text-white">会话登录</span>
               </div>
 
               <form onSubmit={handleSubmit} className="flex flex-col gap-6">
@@ -156,7 +155,7 @@ function LoginHero() {
                       type="text"
                       value={form.username}
                       onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-                      placeholder="Workspace username"
+                      placeholder="登录账号"
                       autoComplete="username"
                       className="h-14 rounded-[32px] border border-transparent bg-transparent px-5 text-[15px] text-slate-900 outline-none placeholder:text-slate-400"
                       required
@@ -165,7 +164,7 @@ function LoginHero() {
                       type="password"
                       value={form.password}
                       onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                      placeholder="Password"
+                      placeholder="登录密码"
                       autoComplete="current-password"
                       className="h-14 rounded-[32px] border border-transparent bg-transparent px-5 text-[15px] text-slate-900 outline-none placeholder:text-slate-400"
                       required
@@ -175,7 +174,7 @@ function LoginHero() {
                       disabled={submitting}
                       className="h-14 rounded-full bg-[linear-gradient(180deg,#252525_0%,#050505_100%)] px-7 text-sm font-medium text-white shadow-[0px_12px_30px_rgba(15,23,42,0.28),inset_-4px_-6px_25px_0px_rgba(201,201,201,0.08),inset_4px_4px_10px_0px_rgba(29,29,29,0.24)] transition hover:translate-y-[-1px] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {submitting ? "Signing In..." : "Secure Sign In"}
+                      {submitting ? "登录中..." : "进入控制台"}
                     </button>
                   </div>
                 </div>
@@ -183,14 +182,13 @@ function LoginHero() {
                 <div className="grid gap-4 rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 text-sm text-slate-600">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="font-medium text-slate-900">Push-ready automations</p>
+                      <p className="font-medium text-slate-900">通知能力已就绪</p>
                       <p className="mt-2 leading-7">
-                        WeCom app notifications can announce first-time syncs, CK count increases or decreases, and
-                        every successful console login.
+                        企业微信应用通知可以推送首次同步、CK 数量增加、CK 数量减少，以及每一次成功的后台登录事件。
                       </p>
                     </div>
                     <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
-                      WeCom
+                      企业微信
                     </span>
                   </div>
 
