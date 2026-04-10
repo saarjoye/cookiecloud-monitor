@@ -1999,6 +1999,7 @@ def fetch_latest_uuid_status_map(sync_uuids: list[str]) -> dict[str, dict[str, A
             f"""
             WITH latest_log AS (
                 SELECT
+                    id,
                     COALESCE(sync_uuid, 'unknown') AS sync_uuid,
                     occurred_at,
                     outcome,
