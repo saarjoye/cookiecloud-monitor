@@ -34,7 +34,12 @@
                     <span class="tool-chip-label">当前账号</span>
                     <strong>{{ dashboard_username }}</strong>
                 </div>
+                <div class="tool-chip">
+                    <span class="tool-chip-label">运行日志文件</span>
+                    <strong>{{ app_log_path }}</strong>
+                </div>
                 <a class="button button-ghost" href="{{ settings_url }}">系统设置</a>
+                <a class="button button-ghost" href="{{ runtime_logs_url }}">运行日志</a>
                 <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
             </div>
         </section>
@@ -272,6 +277,46 @@
                 <p class="empty">暂无登录事件。</p>
                 {% endif %}
             </section>
+        </section>
+
+        <section class="panel panel-surface">
+            <div class="panel-head">
+                <div>
+                    <p class="section-kicker">运行异常</p>
+                    <h2>最近应用错误与告警</h2>
+                </div>
+                <a class="button button-ghost" href="{{ runtime_logs_url }}">查看全部</a>
+            </div>
+            {% if runtime_logs %}
+            <div class="table-shell">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>级别</th>
+                            <th>来源</th>
+                            <th>消息</th>
+                            <th>请求</th>
+                            <th>详情</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in runtime_logs %}
+                        <tr>
+                            <td>{{ item.occurred_at }}</td>
+                            <td><span class="status {% if item.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ item.level }}</span></td>
+                            <td>{{ item.source }}</td>
+                            <td>{{ item.message }}</td>
+                            <td><code>{{ item.request_method or '-' }} {{ item.request_path or '-' }}</code></td>
+                            <td><a class="text-link" href="/runtime-logs/{{ item.id }}">查看</a></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="empty">当前还没有记录到应用异常。新的堆栈错误会同时写入数据库和 <code>{{ app_log_path }}</code>。</p>
+            {% endif %}
         </section>
     </main>
 </body>

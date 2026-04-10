@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>运行日志 - CookieCloud Monitor</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main class="page page-shell page-narrow">
+        <section class="topbar panel-surface">
+            <div class="topbar-copy">
+                <p class="eyebrow">运行日志</p>
+                <h1>最近 50 条应用异常与告警</h1>
+                <p class="subtle">这里会保留完整的运行异常、上游 5xx、转发失败等诊断信息。日志文件路径 <code>{{ app_log_path }}</code></p>
+            </div>
+            <div class="topbar-tools">
+                <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
+                <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
+            </div>
+        </section>
+
+        <section class="panel panel-surface">
+            {% if logs %}
+            <div class="table-shell">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>级别</th>
+                            <th>来源</th>
+                            <th>请求</th>
+                            <th>UUID</th>
+                            <th>消息</th>
+                            <th>详情</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in logs %}
+                        <tr>
+                            <td>{{ log.occurred_at }}</td>
+                            <td><span class="status {% if log.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ log.level }}</span></td>
+                            <td>{{ log.source }}</td>
+                            <td><code>{{ log.request_method or '-' }} {{ log.request_path or '-' }}</code></td>
+                            <td><code>{{ log.sync_uuid or '-' }}</code></td>
+                            <td>{{ log.message }}</td>
+                            <td><a class="text-link" href="/runtime-logs/{{ log.id }}">查看</a></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="empty">当前没有运行异常日志。</p>
+            {% endif %}
+        </section>
+    </main>
+</body>
+</html>

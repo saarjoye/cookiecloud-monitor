@@ -1,11 +1,14 @@
 import hashlib
 import json
+import logging
 import os
 import secrets
 import sqlite3
 import time
+import traceback
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -56,6 +59,10 @@ class Settings:
             (self.wecom_to_user, self.wecom_to_party, self.wecom_to_tag)
         )
 
+    @property
+    def app_log_path(self) -> Path:
+        return self.db_path.with_name("monitor-runtime.log")
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -88,6 +95,15 @@ app.add_middleware(
     https_only=False,
 )
 app.mount("/static", StaticFiles(directory=str(APP_ROOT / "static")), name="static")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:
+    log_runtime_exception(source="unhandled_exception", message="Unhandled application exception", exc=exc, request=request)
+    accepts_json = "application/json" in (request.headers.get("accept") or "").lower()
+    if accepts_json or request.url.path.startswith("/api/"):
+        return JSONResponse(status_code=500, content={"status": "error", "message": "服务内部错误，请到运行日志页面查看详情"})
+    return PlainTextResponse("Internal Server Error", status_code=500)
 
 
 CREATE_LOGS_SQL = """
@@ -154,6 +170,26 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 """
 
+CREATE_RUNTIME_LOGS_SQL = """
+CREATE TABLE IF NOT EXISTS runtime_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at TEXT NOT NULL,
+    level TEXT NOT NULL,
+    source TEXT NOT NULL,
+    message TEXT NOT NULL,
+    traceback_text TEXT,
+    request_method TEXT,
+    request_path TEXT,
+    client_ip TEXT,
+    sync_uuid TEXT
+);
+"""
+
+CREATE_RUNTIME_LOGS_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_runtime_logs_occurred_at
+ON runtime_logs (occurred_at DESC);
+"""
+
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1)
@@ -162,6 +198,7 @@ class LoginRequest(BaseModel):
 
 
 WECOM_TOKEN_CACHE: dict[str, Any] = {"access_token": None, "expires_at": 0.0}
+LOGGER = logging.getLogger("cookiecloud_monitor")
 
 MANAGED_SETTING_KEYS = {
     "cookiecloud_target_url",
@@ -193,13 +230,43 @@ def init_db() -> None:
         connection.execute(CREATE_AUTH_EVENTS_SQL)
         connection.execute(CREATE_AUTH_EVENTS_INDEX_SQL)
         connection.execute(CREATE_APP_SETTINGS_SQL)
+        connection.execute(CREATE_RUNTIME_LOGS_SQL)
+        connection.execute(CREATE_RUNTIME_LOGS_INDEX_SQL)
         connection.commit()
+
+
+def configure_app_logging() -> None:
+    if LOGGER.handlers:
+        return
+
+    settings.app_log_path.parent.mkdir(parents=True, exist_ok=True)
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s %(message)s")
+
+    file_handler = RotatingFileHandler(
+        settings.app_log_path,
+        maxBytes=2 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    stream_handler.setLevel(logging.INFO)
+
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.addHandler(file_handler)
+    LOGGER.addHandler(stream_handler)
+    LOGGER.propagate = False
 
 
 @app.on_event("startup")
 def on_startup() -> None:
+    configure_app_logging()
     init_db()
     refresh_runtime_settings()
+    LOGGER.info("CookieCloud Monitor started target=%s log_path=%s", settings.cookiecloud_target_url, settings.app_log_path)
 
 
 def now_local() -> datetime:
@@ -729,6 +796,79 @@ def record_sync_log(
         )
         connection.commit()
 
+
+def record_runtime_log(
+    *,
+    level: str,
+    source: str,
+    message: str,
+    traceback_text: str | None = None,
+    request_method: str | None = None,
+    request_path: str | None = None,
+    client_ip: str | None = None,
+    sync_uuid: str | None = None,
+) -> None:
+    with get_db_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO runtime_logs (
+                occurred_at, level, source, message, traceback_text,
+                request_method, request_path, client_ip, sync_uuid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                now_local().isoformat(timespec="seconds"),
+                level,
+                source,
+                message,
+                traceback_text,
+                request_method,
+                request_path,
+                client_ip,
+                sync_uuid,
+            ),
+        )
+        connection.commit()
+
+
+def log_runtime_event(
+    *,
+    level: str,
+    source: str,
+    message: str,
+    traceback_text: str | None = None,
+    request: Request | None = None,
+    sync_uuid: str | None = None,
+) -> None:
+    log_method = getattr(LOGGER, level.lower(), LOGGER.info)
+    if traceback_text:
+        log_method("%s\n%s", message, traceback_text)
+    else:
+        log_method("%s", message)
+
+    record_runtime_log(
+        level=level.upper(),
+        source=source,
+        message=message,
+        traceback_text=traceback_text,
+        request_method=request.method if request else None,
+        request_path=request.url.path if request else None,
+        client_ip=client_ip_from_request(request) if request else None,
+        sync_uuid=sync_uuid,
+    )
+
+
+def log_runtime_exception(*, source: str, message: str, exc: Exception, request: Request | None = None, sync_uuid: str | None = None) -> None:
+    log_runtime_event(
+        level="error",
+        source=source,
+        message=f"{message}: {exc}",
+        traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        request=request,
+        sync_uuid=sync_uuid,
+    )
+
+
 def require_page_auth(request: Request) -> RedirectResponse | None:
     if is_authenticated(request):
         return None
@@ -917,6 +1057,14 @@ async def proxy_update(request: Request) -> Response:
             error_message=error_message,
             response_excerpt=build_response_excerpt("upload", outcome, raw_body, json_body),
         )
+        if outcome == "failed":
+            log_runtime_event(
+                level="error" if upstream_response.status_code >= 500 else "warning",
+                source="proxy_update",
+                message=f"Upstream /update returned {upstream_response.status_code}: {error_message or 'unknown error'}",
+                request=request,
+                sync_uuid=sync_uuid,
+            )
         if outcome == "success" and sync_uuid and sync_state is not None:
             try:
                 await send_sync_notification(sync_uuid, sync_state, request)
@@ -947,6 +1095,13 @@ async def proxy_update(request: Request) -> Response:
             response_size=0,
             error_message=error_message,
             response_excerpt=None,
+        )
+        log_runtime_exception(
+            source="proxy_update",
+            message="Proxy update request failed",
+            exc=exc,
+            request=request,
+            sync_uuid=sync_uuid,
         )
         return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud 上传转发失败"})
 
@@ -1001,6 +1156,14 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             error_message=error_message,
             response_excerpt=build_response_excerpt("download", outcome, raw_body, json_body),
         )
+        if outcome == "failed":
+            log_runtime_event(
+                level="error" if upstream_response.status_code >= 500 else "warning",
+                source="proxy_get",
+                message=f"Upstream /get/{sync_uuid} returned {upstream_response.status_code}: {error_message or 'unknown error'}",
+                request=request,
+                sync_uuid=sync_uuid,
+            )
         return Response(
             content=raw_body,
             status_code=upstream_response.status_code,
@@ -1026,6 +1189,13 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             response_size=0,
             error_message=error_message,
             response_excerpt=None,
+        )
+        log_runtime_exception(
+            source="proxy_get",
+            message="Proxy download request failed",
+            exc=exc,
+            request=request,
+            sync_uuid=sync_uuid,
         )
         return JSONResponse(status_code=502, content={"status": "error", "message": "CookieCloud 下载转发失败"})
 
@@ -1198,6 +1368,26 @@ def fetch_recent_auth_events(limit: int = 8) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def fetch_recent_runtime_logs(limit: int = 10) -> list[dict[str, Any]]:
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM runtime_logs
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def fetch_runtime_log_by_id(log_id: int) -> dict[str, Any] | None:
+    with get_db_connection() as connection:
+        row = connection.execute("SELECT * FROM runtime_logs WHERE id = ?", (log_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def build_settings_page_context(
     request: Request,
     *,
@@ -1235,6 +1425,7 @@ async def dashboard(
     summary = fetch_summary_data()
     logs = fetch_recent_logs(sync_uuid=sync_uuid, action=action, outcome=outcome, day=day)
     auth_events = fetch_recent_auth_events()
+    runtime_logs = fetch_recent_runtime_logs()
     status = runtime_status_summary()
     return TEMPLATES.TemplateResponse(
         "dashboard.html",
@@ -1243,6 +1434,7 @@ async def dashboard(
             "summary": summary,
             "logs": logs,
             "auth_events": auth_events,
+            "runtime_logs": runtime_logs,
             "filters": {
                 "sync_uuid": sync_uuid or "",
                 "action": action or "",
@@ -1258,6 +1450,8 @@ async def dashboard(
             "dashboard_username": request.session.get("username") or settings.dashboard_username or "当前会话",
             "logout_url": "/auth/logout",
             "settings_url": "/settings",
+            "runtime_logs_url": "/runtime-logs",
+            "app_log_path": str(settings.app_log_path),
         },
     )
 
@@ -1403,6 +1597,45 @@ async def log_detail(
     if row is None:
         raise HTTPException(status_code=404, detail="日志不存在")
     return TEMPLATES.TemplateResponse("detail.html", {"request": request, "log": dict(row)})
+
+
+@app.get("/runtime-logs", response_class=HTMLResponse)
+async def runtime_logs_page(request: Request) -> Response:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+
+    return TEMPLATES.TemplateResponse(
+        "runtime_logs.html",
+        {
+            "request": request,
+            "logs": fetch_recent_runtime_logs(limit=50),
+            "logout_url": "/auth/logout",
+            "dashboard_url": "/dashboard",
+            "app_log_path": str(settings.app_log_path),
+        },
+    )
+
+
+@app.get("/runtime-logs/{log_id}", response_class=HTMLResponse)
+async def runtime_log_detail(log_id: int, request: Request) -> Response:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+
+    log = fetch_runtime_log_by_id(log_id)
+    if log is None:
+        raise HTTPException(status_code=404, detail="运行日志不存在")
+
+    return TEMPLATES.TemplateResponse(
+        "runtime_log_detail.html",
+        {
+            "request": request,
+            "log": log,
+            "dashboard_url": "/dashboard",
+            "runtime_logs_url": "/runtime-logs",
+        },
+    )
 
 
 @app.get("/api/summary")
