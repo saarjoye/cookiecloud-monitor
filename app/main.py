@@ -638,8 +638,10 @@ def extract_sync_sites(
 
     seen: set[tuple[str, str]] = set()
     sites: list[dict[str, str]] = []
-    for entry in iter_cookie_like_entries(payload):
-        site_domain = normalize_site_domain(entry.get("domain") or entry.get("host") or entry.get("site") or entry.get("url"))
+    for entry, domain_hint in collect_cookie_like_entries(payload):
+        site_domain = normalize_site_domain(
+            entry.get("domain") or entry.get("host") or entry.get("site") or entry.get("url") or domain_hint
+        )
         if not site_domain:
             continue
         site_name = derive_site_name(entry, site_domain)
@@ -871,17 +873,31 @@ def parse_json_text(raw_text: str | None) -> Any | None:
         return None
 
 
-def iter_cookie_like_entries(value: Any) -> list[dict[str, Any]]:
-    matches: list[dict[str, Any]] = []
+def collect_cookie_like_entries(value: Any, inherited_domain: str = "") -> list[tuple[dict[str, Any], str]]:
+    matches: list[tuple[dict[str, Any], str]] = []
+
     if isinstance(value, dict):
+        current_domain = normalize_site_domain(
+            value.get("domain") or value.get("host") or value.get("site") or value.get("url") or inherited_domain
+        )
         if {"name", "value"}.issubset(value.keys()):
-            matches.append(value)
-        for item in value.values():
-            matches.extend(iter_cookie_like_entries(item))
+            matches.append((value, current_domain or inherited_domain))
+
+        for key, item in value.items():
+            next_domain = current_domain or inherited_domain
+            key_domain = normalize_site_domain(key)
+            if key_domain:
+                next_domain = key_domain
+            matches.extend(collect_cookie_like_entries(item, next_domain))
     elif isinstance(value, list):
         for item in value:
-            matches.extend(iter_cookie_like_entries(item))
+            matches.extend(collect_cookie_like_entries(item, inherited_domain))
+
     return matches
+
+
+def iter_cookie_like_entries(value: Any) -> list[dict[str, Any]]:
+    return [entry for entry, _domain_hint in collect_cookie_like_entries(value)]
 
 
 def extract_sync_counts(
@@ -894,14 +910,17 @@ def extract_sync_counts(
     if payload is None:
         return None, None
 
-    cookies = iter_cookie_like_entries(payload)
+    cookie_entries = collect_cookie_like_entries(payload)
+    cookies = [entry for entry, _domain_hint in cookie_entries]
     if not cookies:
         return None, None
 
     domains = {
-        normalize_site_domain(item.get("domain") or item.get("host") or item.get("site") or item.get("url"))
-        for item in cookies
-        if item.get("domain") or item.get("host") or item.get("site") or item.get("url")
+        normalize_site_domain(
+            item.get("domain") or item.get("host") or item.get("site") or item.get("url") or domain_hint
+        )
+        for item, domain_hint in cookie_entries
+        if item.get("domain") or item.get("host") or item.get("site") or item.get("url") or domain_hint
     }
     return len(cookies), len(domains) if domains else None
 
@@ -1798,7 +1817,37 @@ def fetch_recent_logs(
 
     with get_db_connection() as connection:
         rows = connection.execute(query, params).fetchall()
-    return [dict(row) for row in rows]
+        logs = [dict(row) for row in rows]
+
+        if not logs:
+            return []
+
+        log_ids = [int(item["id"]) for item in logs]
+        placeholders = ",".join("?" for _ in log_ids)
+        preview_rows = connection.execute(
+            f"""
+            SELECT sync_log_id, site_domain
+            FROM sync_sites
+            WHERE sync_log_id IN ({placeholders})
+            ORDER BY site_domain ASC, id ASC
+            """,
+            log_ids,
+        ).fetchall()
+
+    preview_map: dict[int, dict[str, Any]] = {}
+    for row in preview_rows:
+        log_id = int(row["sync_log_id"])
+        bucket = preview_map.setdefault(log_id, {"count": 0, "domains": []})
+        bucket["count"] += 1
+        if len(bucket["domains"]) < 3:
+            bucket["domains"].append(str(row["site_domain"]))
+
+    for item in logs:
+        preview = preview_map.get(int(item["id"]), {"count": 0, "domains": []})
+        item["site_count"] = int(preview["count"])
+        item["site_preview"] = list(preview["domains"])
+
+    return logs
 
 
 def fetch_sync_sites_for_log(log_id: int) -> list[dict[str, Any]]:
@@ -1813,6 +1862,113 @@ def fetch_sync_sites_for_log(log_id: int) -> list[dict[str, Any]]:
             (log_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def derive_site_status(
+    *,
+    site_synced_at: str,
+    latest_uuid_outcome: str | None,
+    latest_uuid_log_at: str | None,
+) -> tuple[str, str]:
+    if latest_uuid_outcome and latest_uuid_log_at and latest_uuid_log_at >= site_synced_at:
+        return latest_uuid_outcome, latest_uuid_log_at
+    return "success", site_synced_at
+
+
+def fetch_site_catalog(
+    *,
+    sync_uuid: str | None = None,
+    keyword: str | None = None,
+    outcome: str | None = None,
+) -> dict[str, Any]:
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            """
+            WITH latest_site AS (
+                SELECT
+                    id,
+                    sync_log_id,
+                    COALESCE(sync_uuid, 'unknown') AS sync_uuid,
+                    synced_at,
+                    site_name,
+                    site_domain,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(sync_uuid, 'unknown'), site_domain
+                        ORDER BY synced_at DESC, id DESC
+                    ) AS rn
+                FROM sync_sites
+            ),
+            latest_uuid_log AS (
+                SELECT
+                    id,
+                    COALESCE(sync_uuid, 'unknown') AS sync_uuid,
+                    occurred_at,
+                    outcome,
+                    http_status,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(sync_uuid, 'unknown')
+                        ORDER BY occurred_at DESC, id DESC
+                    ) AS rn
+                FROM sync_logs
+            )
+            SELECT
+                latest_site.sync_log_id,
+                latest_site.sync_uuid,
+                latest_site.synced_at,
+                latest_site.site_name,
+                latest_site.site_domain,
+                latest_uuid_log.id AS latest_log_id,
+                latest_uuid_log.occurred_at AS latest_log_at,
+                latest_uuid_log.outcome AS latest_log_outcome,
+                latest_uuid_log.http_status AS latest_http_status
+            FROM latest_site
+            LEFT JOIN latest_uuid_log
+                ON latest_uuid_log.sync_uuid = latest_site.sync_uuid
+               AND latest_uuid_log.rn = 1
+            WHERE latest_site.rn = 1
+            ORDER BY latest_site.synced_at DESC, latest_site.site_domain ASC
+            """
+        ).fetchall()
+
+    items: list[dict[str, Any]] = []
+    lowered_keyword = (keyword or "").strip().lower()
+    normalized_sync_uuid = (sync_uuid or "").strip()
+    normalized_outcome = (outcome or "").strip()
+
+    for row in rows:
+        item = dict(row)
+        latest_status, latest_time = derive_site_status(
+            site_synced_at=str(item["synced_at"]),
+            latest_uuid_outcome=str(item["latest_log_outcome"]) if item["latest_log_outcome"] else None,
+            latest_uuid_log_at=str(item["latest_log_at"]) if item["latest_log_at"] else None,
+        )
+        item["latest_status"] = latest_status
+        item["latest_status_label"] = "成功" if latest_status == "success" else "失败"
+        item["latest_sync_at"] = latest_time
+        item["detail_log_id"] = item["latest_log_id"] or item["sync_log_id"]
+
+        if normalized_sync_uuid and item["sync_uuid"] != normalized_sync_uuid:
+            continue
+        if normalized_outcome and latest_status != normalized_outcome:
+            continue
+        if lowered_keyword:
+            haystacks = (
+                str(item["site_name"]).lower(),
+                str(item["site_domain"]).lower(),
+                str(item["sync_uuid"]).lower(),
+            )
+            if not any(lowered_keyword in value for value in haystacks):
+                continue
+
+        items.append(item)
+
+    summary = {
+        "total_sites": len(items),
+        "success_sites": sum(1 for item in items if item["latest_status"] == "success"),
+        "failed_sites": sum(1 for item in items if item["latest_status"] == "failed"),
+        "tracked_uuids": len({str(item["sync_uuid"]) for item in items}),
+    }
+    return {"items": items, "summary": summary}
 
 
 def fetch_recent_auth_events(limit: int = 8) -> list[dict[str, Any]]:
@@ -1956,6 +2112,7 @@ async def dashboard(
             "dashboard_username": request.session.get("username") or settings.dashboard_username or "当前会话",
             "logout_url": "/auth/logout",
             "settings_url": "/settings",
+            "sites_url": "/sites",
             "runtime_logs_url": "/runtime-logs",
             "app_log_path": str(settings.app_log_path),
         },
@@ -2108,6 +2265,37 @@ async def log_detail(
             "request": request,
             "log": dict(row),
             "sites": fetch_sync_sites_for_log(log_id),
+            "sites_url": "/sites",
+        },
+    )
+
+
+@app.get("/sites", response_class=HTMLResponse)
+async def sites_page(
+    request: Request,
+    sync_uuid: str | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    outcome: str | None = Query(default=None),
+) -> Response:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+
+    site_catalog = fetch_site_catalog(sync_uuid=sync_uuid, keyword=keyword, outcome=outcome)
+    return TEMPLATES.TemplateResponse(
+        "sites.html",
+        {
+            "request": request,
+            "site_catalog": site_catalog["items"],
+            "site_summary": site_catalog["summary"],
+            "filters": {
+                "sync_uuid": sync_uuid or "",
+                "keyword": keyword or "",
+                "outcome": outcome or "",
+            },
+            "dashboard_url": "/dashboard",
+            "runtime_logs_url": "/runtime-logs",
+            "logout_url": "/auth/logout",
         },
     )
 
@@ -2167,3 +2355,14 @@ async def api_logs(
 ) -> dict[str, Any]:
     require_api_auth(request)
     return {"items": fetch_recent_logs(sync_uuid=sync_uuid, action=action, outcome=outcome, day=day)}
+
+
+@app.get("/api/sites")
+async def api_sites(
+    request: Request,
+    sync_uuid: str | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    outcome: str | None = Query(default=None),
+) -> dict[str, Any]:
+    require_api_auth(request)
+    return fetch_site_catalog(sync_uuid=sync_uuid, keyword=keyword, outcome=outcome)

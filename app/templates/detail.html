@@ -16,6 +16,7 @@
                 <p class="subtle">这里展示单次同步请求的元数据、同步站点明细，以及上游响应摘录。</p>
             </div>
             <div class="topbar-tools">
+                <a class="button button-ghost" href="{{ sites_url }}">站点信息</a>
                 <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
             </div>
         </section>
@@ -78,6 +79,7 @@
                     <p class="section-kicker">同步站点</p>
                     <h2>本次同步站点明细</h2>
                 </div>
+                <a class="ghost-action small" href="{{ sites_url }}">查看全部站点</a>
             </div>
             {% if sites %}
             <div class="table-shell">

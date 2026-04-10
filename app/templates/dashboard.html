@@ -41,6 +41,10 @@
                         <span class="sidebar-icon">ST</span>
                         <span>系统设置</span>
                     </a>
+                    <a class="sidebar-link" href="{{ sites_url }}">
+                        <span class="sidebar-icon">SI</span>
+                        <span>绔欑偣淇℃伅</span>
+                    </a>
                     <a class="sidebar-link" href="{{ runtime_logs_url }}">
                         <span class="sidebar-icon">RT</span>
                         <span>运行日志</span>
@@ -152,7 +156,7 @@
                             <p class="card-kicker">活动流</p>
                             <h2>最近同步动态</h2>
                         </div>
-                        <a class="ghost-action small" href="#sync-log-board">查看全部明细</a>
+                        <a class="ghost-action small" href="{{ sites_url }}">查看站点信息</a>
                     </div>
 
                     {% if logs %}
@@ -342,6 +346,20 @@
                                 <span>请求路径</span>
                                 <strong>{{ log.request_path }}</strong>
                             </div>
+                        </div>
+
+                        <div class="monitor-log-sites">
+                            {% if log.site_count %}
+                            <span class="site-summary-count">已记录 {{ log.site_count }} 个站点</span>
+                            <p>
+                                {% for domain in log.site_preview %}
+                                    <code>{{ domain }}</code>{% if not loop.last %} / {% endif %}
+                                {% endfor %}
+                                {% if log.site_count > (log.site_preview | length) %} / ...{% endif %}
+                            </p>
+                            {% else %}
+                            <p>本次日志暂未生成站点列表。</p>
+                            {% endif %}
                         </div>
 
                         <div class="monitor-log-actions">

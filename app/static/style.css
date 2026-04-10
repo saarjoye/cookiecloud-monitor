@@ -828,6 +828,33 @@ textarea:focus {
     justify-content: flex-end;
 }
 
+.monitor-log-sites {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.74);
+    border: 1px solid rgba(126, 134, 160, 0.08);
+}
+
+.monitor-log-sites p {
+    margin-top: 8px;
+    color: var(--muted);
+    line-height: 1.75;
+    word-break: break-word;
+}
+
+.site-summary-count {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: var(--purple-soft);
+    color: var(--purple-strong);
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .timeline-item.modern {
     display: grid;
     grid-template-columns: 12px 1fr;

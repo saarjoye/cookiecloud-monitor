@@ -9,6 +9,7 @@ It sits in front of CookieCloud, records sync activity into SQLite, exposes a we
 - Stores sync request metadata in SQLite
 - Shows daily metrics, recent logs, 7-day trend, and UUID summary in a web dashboard
 - Shows per-sync site details (site name, domain, synced time) on the log detail page when the payload is parseable
+- Adds a dedicated site inventory page with site name, domain, latest sync status, and latest sync time
 - Can decrypt encrypted CookieCloud upload payloads in memory for site detail extraction when a sync password is provided
 - Replaces browser basic-auth popups with a proper session-based login page
 - Tracks first syncs and CK count changes when payloads can be parsed
@@ -126,12 +127,14 @@ Site detail extraction is also best-effort. When the extension uploads only encr
 
 - `GET /dashboard` - dashboard page
 - `GET /settings` - web settings page
+- `GET /sites` - site inventory page
 - `GET /login` - React login page
 - `POST /auth/login` - session login
 - `POST /auth/logout` - session logout
 - `GET /api/me` - current auth/session info
 - `GET /api/summary` - dashboard summary JSON
 - `GET /api/logs` - recent log JSON
+- `GET /api/sites` - latest site inventory JSON
 - `POST /update` - proxy upload request to CookieCloud
 - `GET/POST /get/{uuid}` - proxy download request to CookieCloud
 - `GET /healthz` - health check
