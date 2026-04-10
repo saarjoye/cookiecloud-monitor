@@ -12,25 +12,29 @@
         {% include "partials/sidebar.html" %}
         <main class="console-main">
             <div class="page page-shell page-narrow">
-        <section class="topbar panel-surface">
-            <div class="topbar-copy">
-                <p class="eyebrow">系统设置</p>
-                <h1>系统设置</h1>
-                <p class="subtle">在这里配置上游 CookieCloud 地址、仪表盘登录账号，以及企业微信应用推送参数。</p>
-            </div>
-            <div class="topbar-tools">
-                <div class="tool-chip">
-                    <span class="tool-chip-label">企业微信推送</span>
-                    <strong>{{ '已配置' if settings_form.wecom_corp_id and settings_form.wecom_agent_id and settings_form.wecom_secret else '未配置' }}</strong>
+                <section class="topbar panel-surface">
+                    <div class="topbar-copy">
+                        <p class="eyebrow">系统设置</p>
+                        <h1>系统设置</h1>
+                        <p class="subtle">在这里配置上游 CookieCloud 地址、仪表盘登录账号，以及企业微信应用推送参数。</p>
+                    </div>
+                <div class="topbar-tools">
+                    <div class="tool-chip">
+                        <span class="tool-chip-label">企业微信推送</span>
+                        <strong>{{ '已配置' if settings_form.wecom_corp_id and settings_form.wecom_agent_id and settings_form.wecom_secret else '未配置' }}</strong>
+                    </div>
+                    <div class="tool-chip">
+                        <span class="tool-chip-label">消息类型</span>
+                        <strong>{{ '图文 news' if settings_form.wecom_message_type == 'news' else '文本 text' }}</strong>
+                    </div>
+                    <div class="tool-chip">
+                        <span class="tool-chip-label">当前账号</span>
+                        <strong>{{ settings_form.dashboard_username or dashboard_username or '当前会话' }}</strong>
+                    </div>
+                    <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
+                    <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
                 </div>
-                <div class="tool-chip">
-                    <span class="tool-chip-label">当前账号</span>
-                    <strong>{{ settings_form.dashboard_username or dashboard_username or '当前会话' }}</strong>
-                </div>
-                <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
-                <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
-            </div>
-        </section>
+                </section>
 
         {% if message %}
         <section class="banner banner-success">{{ message }}</section>
@@ -137,6 +141,14 @@
                         <small>默认使用企业微信官方地址。若你部署了企业微信反代，请在这里填写反代基础地址，例如 `https://wecom-proxy.example.com` 或带前缀路径的 `https://wecom-proxy.example.com/qyapi`。</small>
                     </label>
                     <label class="field">
+                        <span>通知消息类型</span>
+                        <select name="wecom_message_type">
+                            <option value="news" {% if settings_form.wecom_message_type == 'news' %}selected{% endif %}>图文 news</option>
+                            <option value="text" {% if settings_form.wecom_message_type == 'text' %}selected{% endif %}>文本 text</option>
+                        </select>
+                        <small>默认推荐 `news`，更适合在微信里直接查看。若你的企业微信应用只允许文本消息，可切换为 `text`。</small>
+                    </label>
+                    <label class="field">
                         <span>接收成员</span>
                         <input type="text" name="wecom_to_user" value="{{ settings_form.wecom_to_user }}" placeholder="userid1|userid2">
                     </label>
@@ -149,7 +161,7 @@
                         <input type="text" name="wecom_to_tag" value="{{ settings_form.wecom_to_tag }}" placeholder="3|8">
                     </label>
                 </div>
-                <p class="helper-text">只有企业微信应用参数完整，并且至少配置了成员、部门或标签之一，通知才会真正发送。若网络环境无法直连企业微信官方接口，可把“企业微信 API 地址”改成你的反代地址。</p>
+                <p class="helper-text">只有企业微信应用参数完整，并且至少配置了成员、部门或标签之一，通知才会真正发送。若网络环境无法直连企业微信官方接口，可把“企业微信 API 地址”改成你的反代地址。若微信里仍提示需到企业微信查看，请检查应用是否开启了“在微工作台中始终进入主页”。</p>
             </section>
 
             <div class="action-row">
@@ -179,32 +191,36 @@
             </div>
             <div class="preview-grid">
                 <article class="preview-card">
-                    <span class="preview-tag">首次同步</span>
+                    <span class="preview-tag">news 图文</span>
                     <h3>CookieCloud 首次同步提醒</h3>
-                    <pre># CookieCloud 首次同步提醒
-> UUID：`your-uuid`
-> 时间：`2026-04-10T09:30:00`
-> 来源 IP：`192.168.1.100`
-> 当前 CK 数：`28`
-> 站点数：`6`</pre>
+                    <pre>标题：CookieCloud 首次同步提醒
+摘要：UUID：your-uuid
+时间：2026-04-10T09:30:00
+来源 IP：192.168.1.100
+当前 CK 数：28
+站点数：6
+链接：https://your-monitor.example.com/dashboard?sync_uuid=your-uuid</pre>
                 </article>
                 <article class="preview-card">
-                    <span class="preview-tag">CK 变化</span>
+                    <span class="preview-tag">text 文本</span>
                     <h3>CookieCloud CK 数量变化</h3>
-                    <pre># CookieCloud CK 数量增加
-> UUID：`your-uuid`
-> 当前 CK 数：`36`
-> 变更前 CK 数：`28`
-> 变化值：`+8`</pre>
+                    <pre>CookieCloud CK 数量增加
+UUID：your-uuid
+时间：2026-04-10T09:32:00
+来源 IP：192.168.1.100
+当前 CK 数：36
+变更前 CK 数：28
+变化值：+8</pre>
                 </article>
                 <article class="preview-card">
                     <span class="preview-tag">登录提醒</span>
                     <h3>CookieCloud 控制台登录提醒</h3>
-                    <pre># CookieCloud 控制台登录提醒
-> 登录账号：`admin`
-> 时间：`2026-04-10T09:36:00`
-> IP：`192.168.1.30`
-> UA：`Mozilla/5.0 ...`</pre>
+                    <pre>标题：CookieCloud 控制台登录提醒
+摘要：登录账号：admin
+时间：2026-04-10T09:36:00
+IP：192.168.1.30
+UA：Mozilla/5.0 ...
+链接：https://your-monitor.example.com/dashboard</pre>
                 </article>
             </div>
         </section>

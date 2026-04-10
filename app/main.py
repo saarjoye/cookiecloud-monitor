@@ -49,6 +49,7 @@ class Settings:
     wecom_agent_id: str
     wecom_secret: str
     wecom_api_base_url: str
+    wecom_message_type: str
     wecom_to_user: str
     wecom_to_party: str
     wecom_to_tag: str
@@ -92,6 +93,11 @@ class Settings:
             wecom_agent_id=os.getenv("WECOM_AGENT_ID", ""),
             wecom_secret=os.getenv("WECOM_SECRET", ""),
             wecom_api_base_url=(os.getenv("WECOM_API_BASE_URL", "https://qyapi.weixin.qq.com").strip() or "https://qyapi.weixin.qq.com").rstrip("/"),
+            wecom_message_type=(
+                os.getenv("WECOM_MESSAGE_TYPE", "news").strip().lower()
+                if os.getenv("WECOM_MESSAGE_TYPE", "news").strip().lower() in {"text", "news"}
+                else "news"
+            ),
             wecom_to_user=os.getenv("WECOM_TO_USER", ""),
             wecom_to_party=os.getenv("WECOM_TO_PARTY", ""),
             wecom_to_tag=os.getenv("WECOM_TO_TAG", ""),
@@ -245,6 +251,7 @@ MANAGED_SETTING_KEYS = {
     "wecom_agent_id",
     "wecom_secret",
     "wecom_api_base_url",
+    "wecom_message_type",
     "wecom_to_user",
     "wecom_to_party",
     "wecom_to_tag",
@@ -333,6 +340,8 @@ def refresh_runtime_settings() -> None:
                 settings.recent_log_limit = max(int(value), 10)
             except ValueError:
                 continue
+        elif key == "wecom_message_type":
+            settings.wecom_message_type = normalize_wecom_message_type(value)
         else:
             setattr(settings, key, value)
 
@@ -368,6 +377,7 @@ def managed_settings_snapshot() -> dict[str, str]:
         "wecom_agent_id": settings.wecom_agent_id,
         "wecom_secret": settings.wecom_secret,
         "wecom_api_base_url": settings.wecom_api_base_url,
+        "wecom_message_type": settings.wecom_message_type,
         "wecom_to_user": settings.wecom_to_user,
         "wecom_to_party": settings.wecom_to_party,
         "wecom_to_tag": settings.wecom_to_tag,
@@ -376,6 +386,68 @@ def managed_settings_snapshot() -> dict[str, str]:
 
 def build_wecom_api_url(path: str) -> str:
     return f"{settings.wecom_api_base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def normalize_wecom_message_type(value: str | None = None) -> str:
+    normalized = (value or settings.wecom_message_type or "news").strip().lower()
+    return normalized if normalized in {"text", "news"} else "news"
+
+
+def build_monitor_page_url(request: Request, path: str) -> str:
+    base = str(request.base_url).rstrip("/")
+    relative_path = path if path.startswith("/") else f"/{path}"
+    return f"{base}{relative_path}"
+
+
+def normalize_notification_line(line: str) -> str:
+    normalized = line.strip()
+    if normalized.startswith("> "):
+        normalized = normalized[2:]
+    return normalized.replace("`", "")
+
+
+def build_wecom_text_content(title: str, body_lines: list[str]) -> str:
+    normalized_lines = [normalize_notification_line(line) for line in body_lines if normalize_notification_line(line)]
+    return "\n".join([title, *normalized_lines])
+
+
+def build_wecom_news_payload(title: str, body_lines: list[str], request: Request, target_path: str) -> dict[str, Any]:
+    normalized_lines = [normalize_notification_line(line) for line in body_lines if normalize_notification_line(line)]
+    description = "\n".join(normalized_lines)
+    if len(description) > 220:
+        description = f"{description[:217]}..."
+    return {
+        "articles": [
+            {
+                "title": title[:64],
+                "description": description or "点击查看 CookieCloud Monitor 详情",
+                "url": build_monitor_page_url(request, target_path),
+                "picurl": build_monitor_page_url(request, "/static/wecom-card.svg"),
+            }
+        ]
+    }
+
+
+def build_wecom_message_payload(title: str, body_lines: list[str], request: Request, target_path: str) -> dict[str, Any]:
+    receiver_payload = {
+        "touser": settings.wecom_to_user or None,
+        "toparty": settings.wecom_to_party or None,
+        "totag": settings.wecom_to_tag or None,
+    }
+    message_payload = {key: value for key, value in receiver_payload.items() if value}
+    message_payload["agentid"] = int(settings.wecom_agent_id)
+    message_payload["safe"] = 0
+    message_payload["enable_duplicate_check"] = 0
+
+    message_type = normalize_wecom_message_type()
+    if message_type == "text":
+        message_payload["msgtype"] = "text"
+        message_payload["text"] = {"content": build_wecom_text_content(title, body_lines)}
+        return message_payload
+
+    message_payload["msgtype"] = "news"
+    message_payload["news"] = build_wecom_news_payload(title, body_lines, request, target_path)
+    return message_payload
 
 
 def notification_target_summary() -> str:
@@ -1048,29 +1120,15 @@ async def get_wecom_access_token() -> str:
     return token
 
 
-async def send_wecom_markdown(title: str, body_lines: list[str]) -> None:
+async def send_wecom_notification(title: str, body_lines: list[str], request: Request, target_path: str = "/dashboard") -> None:
     if not settings.wecom_enabled:
         return
 
-    receiver_payload = {
-        "touser": settings.wecom_to_user or None,
-        "toparty": settings.wecom_to_party or None,
-        "totag": settings.wecom_to_tag or None,
-    }
-    message_payload = {key: value for key, value in receiver_payload.items() if value}
+    message_payload = build_wecom_message_payload(title, body_lines, request, target_path)
     if not message_payload:
         return
 
     token = await get_wecom_access_token()
-    message_payload.update(
-        {
-            "msgtype": "markdown",
-            "agentid": int(settings.wecom_agent_id),
-            "markdown": {"content": "\n".join([f"# {title}", *body_lines])},
-            "safe": 0,
-            "enable_duplicate_check": 0,
-        }
-    )
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
@@ -1088,7 +1146,7 @@ async def send_wecom_markdown(title: str, body_lines: list[str]) -> None:
 async def send_login_notification(request: Request, username: str) -> None:
     if not settings.wecom_enabled:
         return
-    await send_wecom_markdown(
+    await send_wecom_notification(
         "CookieCloud 控制台登录提醒",
         [
             f"> 登录账号：`{username}`",
@@ -1096,6 +1154,8 @@ async def send_login_notification(request: Request, username: str) -> None:
             f"> IP：`{client_ip_from_request(request) or '-'}`",
             f"> UA：`{(request.headers.get('user-agent') or '-')[:180]}`",
         ],
+        request,
+        "/dashboard",
     )
 
 
@@ -1128,11 +1188,11 @@ async def send_sync_notification(sync_uuid: str, state: dict[str, Any], request:
         sign = "+" if state["cookie_delta"] > 0 else ""
         body_lines.append(f"> 变化值：`{sign}{state['cookie_delta']}`")
 
-    await send_wecom_markdown(title, body_lines)
+    await send_wecom_notification(title, body_lines, request, f"/dashboard?sync_uuid={quote(sync_uuid)}")
 
 
 async def send_test_notification(request: Request) -> None:
-    await send_wecom_markdown(
+    await send_wecom_notification(
         "CookieCloud 测试通知",
         [
             "> 这是一条来自 CookieCloud Monitor 的测试消息。",
@@ -1141,6 +1201,8 @@ async def send_test_notification(request: Request) -> None:
             f"> 接收对象：`{notification_target_summary()}`",
             f"> 触发人：`{request.session.get('username') or settings.dashboard_username or 'unknown'}`",
         ],
+        request,
+        "/settings",
     )
 
 
@@ -2464,6 +2526,7 @@ async def update_settings(
     wecom_agent_id: str = Form(""),
     wecom_secret: str = Form(""),
     wecom_api_base_url: str = Form("https://qyapi.weixin.qq.com"),
+    wecom_message_type: str = Form("news"),
     wecom_to_user: str = Form(""),
     wecom_to_party: str = Form(""),
     wecom_to_tag: str = Form(""),
@@ -2482,6 +2545,7 @@ async def update_settings(
         "wecom_agent_id": wecom_agent_id.strip(),
         "wecom_secret": wecom_secret.strip(),
         "wecom_api_base_url": (wecom_api_base_url.strip() or "https://qyapi.weixin.qq.com").rstrip("/"),
+        "wecom_message_type": normalize_wecom_message_type(wecom_message_type),
         "wecom_to_user": wecom_to_user.strip(),
         "wecom_to_party": wecom_to_party.strip(),
         "wecom_to_tag": wecom_to_tag.strip(),
