@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -378,6 +378,46 @@ def extract_candidate(form_data: dict[str, Any], *keys: str) -> str | None:
         if value:
             return normalize_form_value(value)
     return None
+
+
+def parse_form_map_from_raw_body(raw_body: bytes, content_type: str) -> dict[str, Any]:
+    if not raw_body:
+        return {}
+
+    lowered = content_type.lower()
+    if "application/x-www-form-urlencoded" in lowered:
+        try:
+            return {key: value for key, value in parse_qsl(raw_body.decode("utf-8", errors="replace"), keep_blank_values=True)}
+        except Exception:
+            return {}
+
+    if "application/json" in lowered:
+        try:
+            payload = json.loads(raw_body.decode("utf-8", errors="replace"))
+            if isinstance(payload, dict):
+                return {str(key): value for key, value in payload.items()}
+        except Exception:
+            return {}
+
+    return {}
+
+
+def build_request_debug_summary(
+    *,
+    content_type: str,
+    payload_size: int,
+    payload_hash: str | None,
+    form_map: dict[str, Any],
+    sync_uuid: str | None,
+) -> str:
+    keys = ", ".join(sorted(form_map.keys())) if form_map else "-"
+    return (
+        f"content_type={content_type or '-'}; "
+        f"payload_size={payload_size}; "
+        f"payload_hash={payload_hash or '-'}; "
+        f"form_keys={keys}; "
+        f"detected_uuid={sync_uuid or '-'}"
+    )
 
 
 def build_payload_digest(form_data: dict[str, Any]) -> tuple[int, str | None]:
@@ -1015,16 +1055,27 @@ async def healthz() -> dict[str, str]:
 @app.post("/update")
 async def proxy_update(request: Request) -> Response:
     raw_body = await request.body()
+    content_type = request.headers.get("content-type", "")
     form_map: dict[str, Any] = {}
     try:
         form = await request.form()
         form_map = dict(form.multi_items())
     except Exception:
-        form_map = {}
+        form_map = parse_form_map_from_raw_body(raw_body, content_type)
     sync_uuid = extract_candidate(form_map, "uuid", "userUUID", "user_uuid", "id")
     payload_size, payload_hash = build_payload_digest(form_map)
+    if payload_size == 0 and raw_body:
+        payload_size = len(raw_body)
+        payload_hash = hashlib.sha256(raw_body).hexdigest()
     cookie_count, site_count = extract_sync_counts(form_map)
     start_time = time.perf_counter()
+    request_debug = build_request_debug_summary(
+        content_type=content_type,
+        payload_size=payload_size,
+        payload_hash=payload_hash,
+        form_map=form_map,
+        sync_uuid=sync_uuid,
+    )
 
     try:
         upstream_response = await forward_to_cookiecloud(
@@ -1061,7 +1112,7 @@ async def proxy_update(request: Request) -> Response:
             log_runtime_event(
                 level="error" if upstream_response.status_code >= 500 else "warning",
                 source="proxy_update",
-                message=f"Upstream /update returned {upstream_response.status_code}: {error_message or 'unknown error'}",
+                message=f"Upstream /update returned {upstream_response.status_code}: {error_message or 'unknown error'}; {request_debug}",
                 request=request,
                 sync_uuid=sync_uuid,
             )
@@ -1098,7 +1149,7 @@ async def proxy_update(request: Request) -> Response:
         )
         log_runtime_exception(
             source="proxy_update",
-            message="Proxy update request failed",
+            message=f"Proxy update request failed; {request_debug}",
             exc=exc,
             request=request,
             sync_uuid=sync_uuid,
@@ -1114,6 +1165,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
     data: Any = None
     content: bytes | None = None
     headers: dict[str, str] | None = None
+    content_type = request.headers.get("content-type", "")
 
     if request.method == "POST":
         raw_body = await request.body()
@@ -1123,9 +1175,19 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             form = await request.form()
             form_map = dict(form.multi_items())
         except Exception:
-            form_map = {}
+            form_map = parse_form_map_from_raw_body(raw_body, content_type)
 
     payload_size, payload_hash = build_payload_digest(form_map)
+    if payload_size == 0 and content:
+        payload_size = len(content)
+        payload_hash = hashlib.sha256(content).hexdigest()
+    request_debug = build_request_debug_summary(
+        content_type=content_type,
+        payload_size=payload_size,
+        payload_hash=payload_hash,
+        form_map=form_map,
+        sync_uuid=sync_uuid,
+    )
 
     try:
         upstream_response = await forward_to_cookiecloud(
@@ -1160,7 +1222,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             log_runtime_event(
                 level="error" if upstream_response.status_code >= 500 else "warning",
                 source="proxy_get",
-                message=f"Upstream /get/{sync_uuid} returned {upstream_response.status_code}: {error_message or 'unknown error'}",
+                message=f"Upstream /get/{sync_uuid} returned {upstream_response.status_code}: {error_message or 'unknown error'}; {request_debug}",
                 request=request,
                 sync_uuid=sync_uuid,
             )
@@ -1192,7 +1254,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
         )
         log_runtime_exception(
             source="proxy_get",
-            message="Proxy download request failed",
+            message=f"Proxy download request failed; {request_debug}",
             exc=exc,
             request=request,
             sync_uuid=sync_uuid,
