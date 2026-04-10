@@ -1989,7 +1989,7 @@ def fetch_known_sync_uuids(sync_uuid: str | None = None) -> list[str]:
         return [normalized_sync_uuid]
 
     with get_db_connection() as connection:
-        rows = connection.execute(
+        state_rows = connection.execute(
             """
             SELECT sync_uuid
             FROM sync_states
@@ -1997,7 +1997,26 @@ def fetch_known_sync_uuids(sync_uuid: str | None = None) -> list[str]:
             ORDER BY last_sync_at DESC
             """
         ).fetchall()
-    return [str(row["sync_uuid"]) for row in rows]
+        log_rows = connection.execute(
+            """
+            SELECT sync_uuid, MAX(occurred_at) AS last_seen_at
+            FROM sync_logs
+            WHERE sync_uuid IS NOT NULL AND sync_uuid != '' AND sync_uuid != 'unknown'
+            GROUP BY sync_uuid
+            ORDER BY last_seen_at DESC
+            """
+        ).fetchall()
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for rows in (state_rows, log_rows):
+        for row in rows:
+            value = str(row["sync_uuid"])
+            if not value or value == "unknown" or value in seen:
+                continue
+            seen.add(value)
+            ordered.append(value)
+    return ordered
 
 
 def fetch_latest_uuid_status_map(sync_uuids: list[str]) -> dict[str, dict[str, Any]]:
@@ -2070,18 +2089,41 @@ async def fetch_live_sites_for_uuid(sync_uuid: str) -> list[dict[str, str]]:
     try:
         params = {"password": settings.cookiecloud_sync_password} if settings.cookiecloud_sync_password else None
         upstream_response = await forward_to_cookiecloud(method="GET", path=f"/get/{sync_uuid}", params=params)
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("Live site fetch failed for sync_uuid=%s error=%s", sync_uuid, exc)
         return []
 
     if not (200 <= upstream_response.status_code < 300):
+        LOGGER.warning(
+            "Live site fetch returned non-2xx for sync_uuid=%s status=%s content_type=%s",
+            sync_uuid,
+            upstream_response.status_code,
+            upstream_response.headers.get("content-type", "-"),
+        )
         return []
 
-    return extract_sync_sites(
+    sites = extract_sync_sites(
         {},
         upstream_response.content,
         upstream_response.headers.get("content-type", ""),
         sync_uuid,
     )
+    if sites:
+        return sites
+
+    excerpt = parse_response_excerpt(upstream_response.content) or "-"
+    log_runtime_event(
+        level="warning",
+        source="live_site_catalog",
+        message=(
+            f"Unable to extract sites from upstream /get/{sync_uuid}; "
+            f"content_type={upstream_response.headers.get('content-type', '-')}; "
+            f"password_configured={'yes' if settings.cookiecloud_sync_password else 'no'}; "
+            f"response_excerpt={excerpt}"
+        ),
+        sync_uuid=sync_uuid,
+    )
+    return []
 
 
 async def build_live_site_catalog(
@@ -2145,7 +2187,7 @@ async def build_live_site_catalog(
         "total_sites": len(items),
         "success_sites": sum(1 for item in items if item["latest_status"] == "success"),
         "failed_sites": sum(1 for item in items if item["latest_status"] == "failed"),
-        "tracked_uuids": len({item["sync_uuid"] for item in items}),
+        "tracked_uuids": len(sync_uuids),
     }
     return {"items": items, "summary": summary}
 
