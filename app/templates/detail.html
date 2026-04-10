@@ -11,9 +11,9 @@
     <main class="page page-shell page-narrow">
         <section class="topbar panel-surface">
             <div class="topbar-copy">
-                <p class="eyebrow">日志详情</p>
+                <p class="eyebrow">同步详情</p>
                 <h1>同步详情 #{{ log.id }}</h1>
-                <p class="subtle">这里展示单次同步请求的元数据、耗时、错误信息与响应摘录。</p>
+                <p class="subtle">这里展示单次同步请求的元数据、响应摘要，以及本次可解析到的站点明细。</p>
             </div>
             <div class="topbar-tools">
                 <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
@@ -25,7 +25,9 @@
                 <span class="metric-label">结果</span>
                 <div class="detail-highlight-row">
                     <strong>{{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}</strong>
-                    <span class="status {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">{{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}</span>
+                    <span class="status {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">
+                        {{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}
+                    </span>
                 </div>
                 <small>记录时间 {{ log.occurred_at }}</small>
             </div>
@@ -61,14 +63,47 @@
                         <tr><th>查询参数</th><td><code>{{ log.query_string or '-' }}</code></td></tr>
                         <tr><th>客户端 IP</th><td>{{ log.client_ip or '-' }}</td></tr>
                         <tr><th>浏览器标识</th><td>{{ log.user_agent or '-' }}</td></tr>
-                        <tr><th>耗时</th><td>{{ log.duration_ms }} ms</td></tr>
-                        <tr><th>请求载荷大小</th><td>{{ log.payload_size }} bytes</td></tr>
-                        <tr><th>请求载荷摘要</th><td><code>{{ log.payload_hash or '-' }}</code></td></tr>
+                        <tr><th>请求耗时</th><td>{{ log.duration_ms }} ms</td></tr>
+                        <tr><th>请求体大小</th><td>{{ log.payload_size }} bytes</td></tr>
+                        <tr><th>请求摘要</th><td><code>{{ log.payload_hash or '-' }}</code></td></tr>
                         <tr><th>响应大小</th><td>{{ log.response_size }} bytes</td></tr>
                         <tr><th>错误信息</th><td>{{ log.error_message or '-' }}</td></tr>
                     </tbody>
                 </table>
             </div>
+        </section>
+
+        <section class="panel panel-surface">
+            <div class="panel-head">
+                <div>
+                    <p class="section-kicker">同步站点</p>
+                    <h2>本次同步站点明细</h2>
+                </div>
+            </div>
+            {% if sites %}
+            <div class="table-shell">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>站点名称</th>
+                            <th>站点域名</th>
+                            <th>同步时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for site in sites %}
+                        <tr>
+                            <td>{{ site.site_name }}</td>
+                            <td><code>{{ site.site_domain }}</code></td>
+                            <td>{{ site.synced_at }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="empty">当前这次同步没有解析出可展示的站点明细。常见原因是 CookieCloud 只上传了加密后的 payload，代理在不读取 CK 明文的前提下无法还原站点列表。</p>
+            {% endif %}
         </section>
 
         <section class="panel panel-surface">

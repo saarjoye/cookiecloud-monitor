@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, quote
+from urllib.parse import parse_qsl, quote, urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -190,6 +190,27 @@ CREATE INDEX IF NOT EXISTS idx_runtime_logs_occurred_at
 ON runtime_logs (occurred_at DESC);
 """
 
+CREATE_SYNC_SITES_SQL = """
+CREATE TABLE IF NOT EXISTS sync_sites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sync_log_id INTEGER NOT NULL,
+    sync_uuid TEXT,
+    synced_at TEXT NOT NULL,
+    site_name TEXT NOT NULL,
+    site_domain TEXT NOT NULL
+);
+"""
+
+CREATE_SYNC_SITES_LOG_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_sync_sites_log_id
+ON sync_sites (sync_log_id, site_domain, site_name);
+"""
+
+CREATE_SYNC_SITES_SYNCED_AT_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_sync_sites_synced_at
+ON sync_sites (synced_at DESC, id DESC);
+"""
+
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1)
@@ -232,6 +253,9 @@ def init_db() -> None:
         connection.execute(CREATE_APP_SETTINGS_SQL)
         connection.execute(CREATE_RUNTIME_LOGS_SQL)
         connection.execute(CREATE_RUNTIME_LOGS_INDEX_SQL)
+        connection.execute(CREATE_SYNC_SITES_SQL)
+        connection.execute(CREATE_SYNC_SITES_LOG_INDEX_SQL)
+        connection.execute(CREATE_SYNC_SITES_SYNCED_AT_INDEX_SQL)
         connection.commit()
 
 
@@ -372,6 +396,16 @@ def maybe_json_bytes(raw: bytes) -> Any | None:
         return None
 
 
+def has_meaningful_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict, tuple, set)):
+        return bool(value)
+    return True
+
+
 def extract_candidate(form_data: dict[str, Any], *keys: str) -> str | None:
     for key in keys:
         value = form_data.get(key)
@@ -380,25 +414,32 @@ def extract_candidate(form_data: dict[str, Any], *keys: str) -> str | None:
     return None
 
 
-def extract_candidate_from_payload(payload: Any, *keys: str) -> str | None:
+def extract_value_from_payload(payload: Any, *keys: str) -> Any | None:
     if isinstance(payload, dict):
         for key in keys:
             value = payload.get(key)
-            if value:
-                return normalize_form_value(value)
+            if has_meaningful_value(value):
+                return value
         for value in payload.values():
-            nested = extract_candidate_from_payload(value, *keys)
-            if nested:
+            nested = extract_value_from_payload(value, *keys)
+            if has_meaningful_value(nested):
                 return nested
         return None
 
     if isinstance(payload, list):
         for item in payload:
-            nested = extract_candidate_from_payload(item, *keys)
-            if nested:
+            nested = extract_value_from_payload(item, *keys)
+            if has_meaningful_value(nested):
                 return nested
 
     return None
+
+
+def extract_candidate_from_payload(payload: Any, *keys: str) -> str | None:
+    value = extract_value_from_payload(payload, *keys)
+    if not has_meaningful_value(value):
+        return None
+    return normalize_form_value(value)
 
 
 def extract_candidate_from_raw_body(raw_body: bytes, content_type: str, *keys: str) -> str | None:
@@ -410,6 +451,77 @@ def extract_candidate_from_raw_body(raw_body: bytes, content_type: str, *keys: s
         return None
 
     return extract_candidate_from_payload(payload, *keys)
+
+
+def extract_structured_sync_payload(form_data: dict[str, Any], raw_body: bytes, content_type: str) -> Any | None:
+    raw_payload = maybe_json_bytes(raw_body) if "application/json" in content_type.lower() else None
+    candidate_keys = ("cookie_data", "data", "payload", "local_storage_data")
+
+    for source in (form_data, raw_payload):
+        if not source:
+            continue
+
+        candidate = extract_value_from_payload(source, *candidate_keys)
+        for value in (candidate, source):
+            if isinstance(value, str):
+                parsed = parse_json_text(value)
+                if parsed is not None:
+                    return parsed
+            elif isinstance(value, (dict, list)) and iter_cookie_like_entries(value):
+                return value
+
+    return None
+
+
+def normalize_site_domain(value: Any) -> str:
+    raw = normalize_form_value(value).strip()
+    if not raw:
+        return ""
+
+    if "://" in raw:
+        parsed = urlparse(raw)
+        raw = parsed.hostname or parsed.netloc or raw
+
+    raw = raw.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    if ":" in raw and raw.count(":") == 1:
+        raw = raw.split(":", 1)[0]
+    return raw.lstrip(".").strip().lower()
+
+
+def derive_site_name(entry: dict[str, Any], site_domain: str) -> str:
+    for key in ("site_name", "siteName", "title", "site", "host", "domain"):
+        value = normalize_form_value(entry.get(key)).strip()
+        if value:
+            if key in {"host", "domain"}:
+                return normalize_site_domain(value) or site_domain or value
+            return value
+    return site_domain or "未知站点"
+
+
+def extract_sync_sites(form_data: dict[str, Any], raw_body: bytes, content_type: str) -> list[dict[str, str]]:
+    payload = extract_structured_sync_payload(form_data, raw_body, content_type)
+    if payload is None:
+        return []
+
+    seen: set[tuple[str, str]] = set()
+    sites: list[dict[str, str]] = []
+    for entry in iter_cookie_like_entries(payload):
+        site_domain = normalize_site_domain(entry.get("domain") or entry.get("host") or entry.get("site") or entry.get("url"))
+        if not site_domain:
+            continue
+        site_name = derive_site_name(entry, site_domain)
+        dedupe_key = (site_name.lower(), site_domain)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        sites.append(
+            {
+                "site_name": site_name[:120],
+                "site_domain": site_domain[:255],
+            }
+        )
+
+    return sorted(sites, key=lambda item: (item["site_domain"], item["site_name"]))
 
 
 def parse_form_map_from_raw_body(raw_body: bytes, content_type: str) -> dict[str, Any]:
@@ -639,16 +751,8 @@ def iter_cookie_like_entries(value: Any) -> list[dict[str, Any]]:
     return matches
 
 
-def extract_sync_counts(form_data: dict[str, Any]) -> tuple[int | None, int | None]:
-    payload = parse_json_text(
-        extract_candidate(
-            form_data,
-            "cookie_data",
-            "data",
-            "payload",
-            "local_storage_data",
-        )
-    )
+def extract_sync_counts(form_data: dict[str, Any], raw_body: bytes, content_type: str) -> tuple[int | None, int | None]:
+    payload = extract_structured_sync_payload(form_data, raw_body, content_type)
     if payload is None:
         return None, None
 
@@ -657,7 +761,7 @@ def extract_sync_counts(form_data: dict[str, Any]) -> tuple[int | None, int | No
         return None, None
 
     domains = {
-        normalize_form_value(item.get("domain") or item.get("host") or item.get("site") or item.get("url"))
+        normalize_site_domain(item.get("domain") or item.get("host") or item.get("site") or item.get("url"))
         for item in cookies
         if item.get("domain") or item.get("host") or item.get("site") or item.get("url")
     }
@@ -874,10 +978,10 @@ def record_sync_log(
     response_size: int,
     error_message: str | None,
     response_excerpt: str | None,
-) -> None:
+) -> dict[str, Any]:
     timestamp = now_local()
     with get_db_connection() as connection:
-        connection.execute(
+        cursor = connection.execute(
             """
             INSERT INTO sync_logs (
                 occurred_at, occurred_day, action, sync_uuid, outcome, http_status,
@@ -907,6 +1011,7 @@ def record_sync_log(
             ),
         )
         connection.commit()
+    return {"id": int(cursor.lastrowid), "occurred_at": timestamp.isoformat(timespec="seconds")}
 
 
 def record_runtime_log(
@@ -939,6 +1044,36 @@ def record_runtime_log(
                 client_ip,
                 sync_uuid,
             ),
+        )
+        connection.commit()
+
+
+def record_sync_sites(
+    *,
+    sync_log_id: int,
+    sync_uuid: str | None,
+    synced_at: str,
+    sites: list[dict[str, str]],
+) -> None:
+    if not sites:
+        return
+
+    with get_db_connection() as connection:
+        connection.executemany(
+            """
+            INSERT INTO sync_sites (sync_log_id, sync_uuid, synced_at, site_name, site_domain)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    sync_log_id,
+                    sync_uuid,
+                    synced_at,
+                    item["site_name"],
+                    item["site_domain"],
+                )
+                for item in sites
+            ],
         )
         connection.commit()
 
@@ -1141,7 +1276,8 @@ async def proxy_update(request: Request) -> Response:
     if payload_size == 0 and raw_body:
         payload_size = len(raw_body)
         payload_hash = hashlib.sha256(raw_body).hexdigest()
-    cookie_count, site_count = extract_sync_counts(form_map)
+    cookie_count, site_count = extract_sync_counts(form_map, raw_body, content_type)
+    sync_sites = extract_sync_sites(form_map, raw_body, content_type)
     start_time = time.perf_counter()
     request_debug = build_request_debug_summary(
         content_type=content_type,
@@ -1167,7 +1303,7 @@ async def proxy_update(request: Request) -> Response:
         sync_state: dict[str, Any] | None = None
         if outcome == "success":
             sync_state = update_sync_state(sync_uuid, payload_hash, cookie_count, site_count)
-        record_sync_log(
+        sync_log = record_sync_log(
             action="upload",
             sync_uuid=sync_uuid,
             outcome=outcome,
@@ -1184,6 +1320,13 @@ async def proxy_update(request: Request) -> Response:
             error_message=error_message,
             response_excerpt=build_response_excerpt("upload", outcome, raw_body, json_body),
         )
+        if outcome == "success" and sync_sites:
+            record_sync_sites(
+                sync_log_id=sync_log["id"],
+                sync_uuid=sync_uuid,
+                synced_at=sync_log["occurred_at"],
+                sites=sync_sites,
+            )
         if outcome == "failed":
             response_excerpt = build_response_excerpt("upload", outcome, raw_body, json_body)
             log_runtime_event(
@@ -1502,6 +1645,20 @@ def fetch_recent_logs(
     return [dict(row) for row in rows]
 
 
+def fetch_sync_sites_for_log(log_id: int) -> list[dict[str, Any]]:
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT sync_log_id, sync_uuid, synced_at, site_name, site_domain
+            FROM sync_sites
+            WHERE sync_log_id = ?
+            ORDER BY site_domain ASC, site_name ASC, id ASC
+            """,
+            (log_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def fetch_recent_auth_events(limit: int = 8) -> list[dict[str, Any]]:
     with get_db_connection() as connection:
         rows = connection.execute(
@@ -1744,7 +1901,14 @@ async def log_detail(
         row = connection.execute("SELECT * FROM sync_logs WHERE id = ?", (log_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="日志不存在")
-    return TEMPLATES.TemplateResponse("detail.html", {"request": request, "log": dict(row)})
+    return TEMPLATES.TemplateResponse(
+        "detail.html",
+        {
+            "request": request,
+            "log": dict(row),
+            "sites": fetch_sync_sites_for_log(log_id),
+        },
+    )
 
 
 @app.get("/runtime-logs", response_class=HTMLResponse)

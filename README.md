@@ -8,6 +8,7 @@ It sits in front of CookieCloud, records sync activity into SQLite, exposes a we
 - Proxies CookieCloud upload and download traffic through `POST /update` and `GET/POST /get/{uuid}`
 - Stores sync request metadata in SQLite
 - Shows daily metrics, recent logs, 7-day trend, and UUID summary in a web dashboard
+- Shows per-sync site details (site name, domain, synced time) on the log detail page when the payload is parseable
 - Replaces browser basic-auth popups with a proper session-based login page
 - Tracks first syncs and CK count changes when payloads can be parsed
 - Pushes login and sync notifications to a WeCom app
@@ -108,6 +109,7 @@ When WeCom credentials are configured, the service can send markdown notificatio
 - Payload updates when the payload hash changes
 
 CK count tracking is best-effort. If CookieCloud sends only encrypted payloads, the proxy can still detect first syncs and payload updates, but may not be able to calculate exact CK counts.
+Site detail extraction is also best-effort. When the extension uploads only encrypted payloads, the monitor cannot reconstruct site name/domain without reading or decrypting the cookie payload.
 
 ## API Endpoints
 
