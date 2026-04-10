@@ -20,11 +20,22 @@
                         <p class="subtle">这里汇总每个 UUID 下当前 CookieCloud 中的站点名称、站点域名、最近同步状态和最近同步时间。站点列表优先实时读取当前数据，不只依赖历史新增同步。</p>
                     </div>
                     <div class="topbar-tools">
+                        <form method="post" action="/sites/refresh">
+                            <input type="hidden" name="sync_uuid" value="{{ filters.sync_uuid }}">
+                            <button class="button" type="submit">立即同步 CookieCloud</button>
+                        </form>
                         <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
                         <a class="button button-ghost" href="{{ runtime_logs_url }}">运行日志</a>
                         <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
                     </div>
                 </section>
+
+                {% if message %}
+                <section class="banner banner-success">{{ message }}</section>
+                {% endif %}
+                {% if error %}
+                <section class="banner banner-error">{{ error }}</section>
+                {% endif %}
 
                 <section class="cards">
                     <article class="metric-card panel-surface">

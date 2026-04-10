@@ -2192,6 +2192,58 @@ async def build_live_site_catalog(
     return {"items": items, "summary": summary}
 
 
+async def refresh_live_site_catalog(sync_uuid: str | None = None) -> dict[str, Any]:
+    sync_uuids = fetch_known_sync_uuids(sync_uuid)
+    if not sync_uuids:
+        log_runtime_event(
+            level="warning",
+            source="live_site_catalog",
+            message="Manual site refresh skipped because no tracked UUIDs were found.",
+        )
+        return {
+            "ok": False,
+            "message": "没有找到可刷新的 UUID。请先确认同步日志里已经出现过有效 UUID。",
+            "uuid_count": 0,
+            "site_count": 0,
+        }
+
+    semaphore = asyncio.Semaphore(6)
+
+    async def worker(uuid_value: str) -> tuple[str, list[dict[str, str]]]:
+        async with semaphore:
+            return uuid_value, await fetch_live_sites_for_uuid(uuid_value)
+
+    results = await asyncio.gather(*(worker(item) for item in sync_uuids))
+    site_count = sum(len(sites) for _uuid, sites in results)
+    success_uuids = [uuid_value for uuid_value, sites in results if sites]
+    failed_uuids = [uuid_value for uuid_value, sites in results if not sites]
+
+    log_runtime_event(
+        level="info" if success_uuids else "warning",
+        source="live_site_catalog",
+        message=(
+            f"Manual site refresh finished; tracked_uuids={len(sync_uuids)}; "
+            f"uuids_with_sites={len(success_uuids)}; total_sites={site_count}; "
+            f"empty_uuids={', '.join(failed_uuids[:10]) if failed_uuids else '-'}"
+        ),
+    )
+
+    if success_uuids:
+        return {
+            "ok": True,
+            "message": f"已刷新 {len(sync_uuids)} 个 UUID，识别到 {site_count} 个站点。",
+            "uuid_count": len(sync_uuids),
+            "site_count": site_count,
+        }
+
+    return {
+        "ok": False,
+        "message": "已触发刷新，但仍未识别出任何站点。请立刻查看运行日志中 source=live_site_catalog 的最新记录。",
+        "uuid_count": len(sync_uuids),
+        "site_count": 0,
+    }
+
+
 async def build_log_site_preview_map(sync_uuids: list[str]) -> dict[str, dict[str, Any]]:
     known_sync_uuids = [item for item in sync_uuids if item and item != "unknown"]
     if not known_sync_uuids:
@@ -2547,6 +2599,8 @@ async def sites_page(
     sync_uuid: str | None = Query(default=None),
     keyword: str | None = Query(default=None),
     outcome: str | None = Query(default=None),
+    message: str = Query(default=""),
+    error: str = Query(default=""),
 ) -> Response:
     redirect = require_page_auth(request)
     if redirect is not None:
@@ -2564,6 +2618,8 @@ async def sites_page(
                 "keyword": keyword or "",
                 "outcome": outcome or "",
             },
+            "message": message,
+            "error": error,
             "dashboard_url": "/dashboard",
             "runtime_logs_url": "/runtime-logs",
             "logout_url": "/auth/logout",
@@ -2571,6 +2627,21 @@ async def sites_page(
             "active_nav": "sites",
         },
     )
+
+
+@app.post("/sites/refresh")
+async def refresh_sites(
+    request: Request,
+    sync_uuid: str = Form(""),
+) -> Response:
+    redirect = require_page_auth(request)
+    if redirect is not None:
+        return redirect
+
+    result = await refresh_live_site_catalog(sync_uuid.strip() or None)
+    query = f"sync_uuid={quote(sync_uuid.strip())}&" if sync_uuid.strip() else ""
+    key = "message" if result["ok"] else "error"
+    return RedirectResponse(url=f"/sites?{query}{key}={quote(result['message'])}", status_code=303)
 
 
 @app.get("/runtime-logs", response_class=HTMLResponse)
