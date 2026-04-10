@@ -1,3 +1,4 @@
+import gzip
 import hashlib
 import json
 import logging
@@ -6,6 +7,7 @@ import secrets
 import sqlite3
 import time
 import traceback
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -385,6 +387,27 @@ def normalize_form_value(value: Any) -> str:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def decode_request_body_for_inspection(raw_body: bytes, content_encoding: str) -> bytes:
+    if not raw_body:
+        return raw_body
+
+    encoding = (content_encoding or "").lower().strip()
+    if not encoding or encoding == "identity":
+        return raw_body
+
+    try:
+        if encoding == "gzip":
+            return gzip.decompress(raw_body)
+        if encoding == "deflate":
+            return zlib.decompress(raw_body)
+        if encoding == "x-gzip":
+            return gzip.decompress(raw_body)
+    except Exception:
+        return raw_body
+
+    return raw_body
 
 
 def maybe_json_bytes(raw: bytes) -> Any | None:
@@ -1263,21 +1286,26 @@ async def healthz() -> dict[str, str]:
 async def proxy_update(request: Request) -> Response:
     raw_body = await request.body()
     content_type = request.headers.get("content-type", "")
+    content_encoding = request.headers.get("content-encoding", "")
+    inspection_body = decode_request_body_for_inspection(raw_body, content_encoding)
     form_map: dict[str, Any] = {}
-    try:
-        form = await request.form()
-        form_map = dict(form.multi_items())
-    except Exception:
-        form_map = parse_form_map_from_raw_body(raw_body, content_type)
+    if content_encoding and content_encoding.lower() != "identity":
+        form_map = parse_form_map_from_raw_body(inspection_body, content_type)
+    else:
+        try:
+            form = await request.form()
+            form_map = dict(form.multi_items())
+        except Exception:
+            form_map = parse_form_map_from_raw_body(inspection_body, content_type)
     sync_uuid = extract_candidate(form_map, "uuid", "userUUID", "user_uuid", "id")
     if not sync_uuid:
-        sync_uuid = extract_candidate_from_raw_body(raw_body, content_type, "uuid", "userUUID", "user_uuid", "id")
+        sync_uuid = extract_candidate_from_raw_body(inspection_body, content_type, "uuid", "userUUID", "user_uuid", "id")
     payload_size, payload_hash = build_payload_digest(form_map)
     if payload_size == 0 and raw_body:
         payload_size = len(raw_body)
         payload_hash = hashlib.sha256(raw_body).hexdigest()
-    cookie_count, site_count = extract_sync_counts(form_map, raw_body, content_type)
-    sync_sites = extract_sync_sites(form_map, raw_body, content_type)
+    cookie_count, site_count = extract_sync_counts(form_map, inspection_body, content_type)
+    sync_sites = extract_sync_sites(form_map, inspection_body, content_type)
     start_time = time.perf_counter()
     request_debug = build_request_debug_summary(
         content_type=content_type,
@@ -1285,7 +1313,7 @@ async def proxy_update(request: Request) -> Response:
         payload_hash=payload_hash,
         form_map=form_map,
         sync_uuid=sync_uuid,
-        raw_body=raw_body,
+        raw_body=inspection_body,
         source_headers=request.headers,
     )
 
@@ -1326,6 +1354,13 @@ async def proxy_update(request: Request) -> Response:
                 sync_uuid=sync_uuid,
                 synced_at=sync_log["occurred_at"],
                 sites=sync_sites,
+            )
+        if outcome == "success" and not sync_uuid:
+            log_runtime_event(
+                level="warning",
+                source="proxy_update",
+                message=f"Upload succeeded but sync UUID was not identified; {request_debug}",
+                request=request,
             )
         if outcome == "failed":
             response_excerpt = build_response_excerpt("upload", outcome, raw_body, json_body)
@@ -1389,16 +1424,22 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
     content: bytes | None = None
     headers: dict[str, str] | None = None
     content_type = request.headers.get("content-type", "")
+    content_encoding = request.headers.get("content-encoding", "")
+    inspection_body: bytes | None = None
 
     if request.method == "POST":
         raw_body = await request.body()
         content = raw_body
+        inspection_body = decode_request_body_for_inspection(raw_body, content_encoding)
         headers = filtered_request_headers(request.headers)
-        try:
-            form = await request.form()
-            form_map = dict(form.multi_items())
-        except Exception:
-            form_map = parse_form_map_from_raw_body(raw_body, content_type)
+        if content_encoding and content_encoding.lower() != "identity":
+            form_map = parse_form_map_from_raw_body(inspection_body, content_type)
+        else:
+            try:
+                form = await request.form()
+                form_map = dict(form.multi_items())
+            except Exception:
+                form_map = parse_form_map_from_raw_body(inspection_body or raw_body, content_type)
 
     payload_size, payload_hash = build_payload_digest(form_map)
     if payload_size == 0 and content:
@@ -1410,7 +1451,7 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
         payload_hash=payload_hash,
         form_map=form_map,
         sync_uuid=sync_uuid,
-        raw_body=content,
+        raw_body=inspection_body or content,
         source_headers=request.headers,
     )
 
