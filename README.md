@@ -9,6 +9,7 @@ It sits in front of CookieCloud, records sync activity into SQLite, exposes a we
 - Stores sync request metadata in SQLite
 - Shows daily metrics, recent logs, 7-day trend, and UUID summary in a web dashboard
 - Shows per-sync site details (site name, domain, synced time) on the log detail page when the payload is parseable
+- Can decrypt encrypted CookieCloud upload payloads in memory for site detail extraction when a sync password is provided
 - Replaces browser basic-auth popups with a proper session-based login page
 - Tracks first syncs and CK count changes when payloads can be parsed
 - Pushes login and sync notifications to a WeCom app
@@ -23,6 +24,7 @@ The browser extension points to this service instead of pointing to CookieCloud 
 4. Optional WeCom notifications are sent for important events
 
 The proxy does not persist raw cookie plaintext or LocalStorage plaintext.
+When encrypted payload parsing is enabled, decryption happens only in memory and only site metadata/counts are persisted.
 
 ## Quick Start
 
@@ -36,6 +38,7 @@ services:
     restart: unless-stopped
     environment:
       COOKIECLOUD_TARGET_URL: http://192.168.1.2:8088
+      COOKIECLOUD_SYNC_PASSWORD: your-cookiecloud-sync-password
       MONITOR_DB_PATH: /data/monitor.db
       MONITOR_TIMEZONE: Asia/Shanghai
       DASHBOARD_USERNAME: admin
@@ -83,6 +86,7 @@ http://YOUR_SERVER_IP:8090/settings
 | Variable | Description | Default |
 | --- | --- | --- |
 | `COOKIECLOUD_TARGET_URL` | Upstream CookieCloud URL | `http://cookiecloud:8088` |
+| `COOKIECLOUD_SYNC_PASSWORD` | CookieCloud sync password used only for in-memory payload decryption | empty |
 | `MONITOR_DB_PATH` | SQLite database path | `/data/monitor.db` |
 | `MONITOR_TIMEZONE` | Display timezone | `Asia/Shanghai` |
 | `DASHBOARD_USERNAME` | Dashboard username | empty |
@@ -109,7 +113,14 @@ When WeCom credentials are configured, the service can send markdown notificatio
 - Payload updates when the payload hash changes
 
 CK count tracking is best-effort. If CookieCloud sends only encrypted payloads, the proxy can still detect first syncs and payload updates, but may not be able to calculate exact CK counts.
-Site detail extraction is also best-effort. When the extension uploads only encrypted payloads, the monitor cannot reconstruct site name/domain without reading or decrypting the cookie payload.
+Site detail extraction is also best-effort. When the extension uploads only encrypted payloads, configure `COOKIECLOUD_SYNC_PASSWORD` so the monitor can decrypt the payload in memory and extract only site metadata. Without that password, site name/domain cannot be reconstructed.
+
+## Security Notes
+
+- Keep `COOKIECLOUD_SYNC_PASSWORD` in container environment variables or a secret manager. Do not expose it in the web UI.
+- The monitor does not store the sync password in SQLite.
+- Decrypted payloads are used only in memory to calculate counts and site metadata, then discarded.
+- Raw cookie plaintext and LocalStorage plaintext are not persisted.
 
 ## API Endpoints
 

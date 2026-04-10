@@ -57,6 +57,7 @@
                     <p>插件直接填写当前 Monitor 地址，或者让现有域名先反代到 Monitor，再由 Monitor 转发给 CookieCloud。</p>
                 </article>
             </div>
+            <p class="helper-text">如需解析加密上传里的站点明细，请在容器环境变量中配置 <code>COOKIECLOUD_SYNC_PASSWORD</code>。该密码不会显示在页面里，也不会写入数据库。</p>
         </section>
 
         <form method="post" action="/settings" class="settings-stack">

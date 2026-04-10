@@ -1,3 +1,4 @@
+import base64
 import gzip
 import hashlib
 import json
@@ -17,6 +18,8 @@ from urllib.parse import parse_qsl, quote, urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 from fastapi import Body, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +35,7 @@ TEMPLATES = Jinja2Templates(directory=str(APP_ROOT / "templates"))
 @dataclass
 class Settings:
     cookiecloud_target_url: str
+    cookiecloud_sync_password: str
     db_path: Path
     timezone_name: str
     dashboard_username: str
@@ -65,10 +69,15 @@ class Settings:
     def app_log_path(self) -> Path:
         return self.db_path.with_name("monitor-runtime.log")
 
+    @property
+    def encrypted_site_details_enabled(self) -> bool:
+        return bool(self.cookiecloud_sync_password)
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
             cookiecloud_target_url=os.getenv("COOKIECLOUD_TARGET_URL", "http://cookiecloud:8088").rstrip("/"),
+            cookiecloud_sync_password=os.getenv("COOKIECLOUD_SYNC_PASSWORD", ""),
             db_path=Path(os.getenv("MONITOR_DB_PATH", "/data/monitor.db")),
             timezone_name=os.getenv("MONITOR_TIMEZONE", "Asia/Shanghai"),
             dashboard_username=os.getenv("DASHBOARD_USERNAME", ""),
@@ -402,6 +411,27 @@ def runtime_status_summary() -> dict[str, str]:
     }
 
 
+def notification_target_summary() -> str:
+    targets = []
+    if settings.wecom_to_user:
+        targets.append(f"成员 {settings.wecom_to_user}")
+    if settings.wecom_to_party:
+        targets.append(f"部门 {settings.wecom_to_party}")
+    if settings.wecom_to_tag:
+        targets.append(f"标签 {settings.wecom_to_tag}")
+    return " / ".join(targets) if targets else "未配置接收对象"
+
+
+def runtime_status_summary() -> dict[str, str]:
+    return {
+        "notification_status": "已启用" if settings.wecom_enabled else "未配置",
+        "notification_target": notification_target_summary(),
+        "proxy_mode": "前置代理模式",
+        "proxy_hint": "请让浏览器插件请求当前 Monitor 地址，或由反向代理先转到 Monitor，再转发到真正的 CookieCloud。",
+        "target_url": settings.cookiecloud_target_url,
+    }
+
+
 def normalize_form_value(value: Any) -> str:
     if value is None:
         return ""
@@ -429,6 +459,41 @@ def decode_request_body_for_inspection(raw_body: bytes, content_encoding: str) -
         return raw_body
 
     return raw_body
+
+
+def derive_cookiecloud_passphrase(sync_uuid: str) -> str | None:
+    if not sync_uuid or not settings.cookiecloud_sync_password:
+        return None
+    return hashlib.md5(f"{sync_uuid}-{settings.cookiecloud_sync_password}".encode("utf-8")).hexdigest()
+
+
+def evp_bytes_to_key(passphrase: bytes, salt: bytes, *, key_length: int = 32, iv_length: int = 16) -> tuple[bytes, bytes]:
+    material = b""
+    block = b""
+    while len(material) < key_length + iv_length:
+        block = hashlib.md5(block + passphrase + salt).digest()
+        material += block
+    return material[:key_length], material[key_length : key_length + iv_length]
+
+
+def decrypt_cookiecloud_payload(sync_uuid: str, encrypted_payload: str) -> Any | None:
+    passphrase = derive_cookiecloud_passphrase(sync_uuid)
+    if not passphrase or not encrypted_payload:
+        return None
+
+    try:
+        raw = base64.b64decode(encrypted_payload)
+        if len(raw) <= 16 or not raw.startswith(b"Salted__"):
+            return None
+        salt = raw[8:16]
+        ciphertext = raw[16:]
+        key, iv = evp_bytes_to_key(passphrase.encode("utf-8"), salt)
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
+        return json.loads(plaintext.decode("utf-8"))
+    except Exception:
+        LOGGER.warning("Unable to decrypt CookieCloud payload for sync_uuid=%s", sync_uuid)
+        return None
 
 
 def maybe_json_bytes(raw: bytes) -> Any | None:
@@ -497,7 +562,12 @@ def extract_candidate_from_raw_body(raw_body: bytes, content_type: str, *keys: s
     return extract_candidate_from_payload(payload, *keys)
 
 
-def extract_structured_sync_payload(form_data: dict[str, Any], raw_body: bytes, content_type: str) -> Any | None:
+def extract_structured_sync_payload(
+    form_data: dict[str, Any],
+    raw_body: bytes,
+    content_type: str,
+    sync_uuid: str | None = None,
+) -> Any | None:
     raw_payload = maybe_json_bytes(raw_body) if "application/json" in content_type.lower() else None
     candidate_keys = ("cookie_data", "data", "payload", "local_storage_data")
 
@@ -513,6 +583,20 @@ def extract_structured_sync_payload(form_data: dict[str, Any], raw_body: bytes, 
                     return parsed
             elif isinstance(value, (dict, list)) and iter_cookie_like_entries(value):
                 return value
+
+    if sync_uuid:
+        encrypted_payload = None
+        for source in (form_data, raw_payload):
+            if not source:
+                continue
+            encrypted_payload = extract_candidate_from_payload(source, "encrypted")
+            if encrypted_payload:
+                break
+
+        if encrypted_payload:
+            decrypted_payload = decrypt_cookiecloud_payload(sync_uuid, encrypted_payload)
+            if isinstance(decrypted_payload, (dict, list)):
+                return decrypted_payload
 
     return None
 
@@ -542,8 +626,13 @@ def derive_site_name(entry: dict[str, Any], site_domain: str) -> str:
     return site_domain or "未知站点"
 
 
-def extract_sync_sites(form_data: dict[str, Any], raw_body: bytes, content_type: str) -> list[dict[str, str]]:
-    payload = extract_structured_sync_payload(form_data, raw_body, content_type)
+def extract_sync_sites(
+    form_data: dict[str, Any],
+    raw_body: bytes,
+    content_type: str,
+    sync_uuid: str | None = None,
+) -> list[dict[str, str]]:
+    payload = extract_structured_sync_payload(form_data, raw_body, content_type, sync_uuid)
     if payload is None:
         return []
 
@@ -795,8 +884,13 @@ def iter_cookie_like_entries(value: Any) -> list[dict[str, Any]]:
     return matches
 
 
-def extract_sync_counts(form_data: dict[str, Any], raw_body: bytes, content_type: str) -> tuple[int | None, int | None]:
-    payload = extract_structured_sync_payload(form_data, raw_body, content_type)
+def extract_sync_counts(
+    form_data: dict[str, Any],
+    raw_body: bytes,
+    content_type: str,
+    sync_uuid: str | None = None,
+) -> tuple[int | None, int | None]:
+    payload = extract_structured_sync_payload(form_data, raw_body, content_type, sync_uuid)
     if payload is None:
         return None, None
 
@@ -1325,8 +1419,8 @@ async def proxy_update(request: Request) -> Response:
     if payload_size == 0 and raw_body:
         payload_size = len(raw_body)
         payload_hash = hashlib.sha256(raw_body).hexdigest()
-    cookie_count, site_count = extract_sync_counts(form_map, inspection_body, content_type)
-    sync_sites = extract_sync_sites(form_map, inspection_body, content_type)
+    cookie_count, site_count = extract_sync_counts(form_map, inspection_body, content_type, sync_uuid)
+    sync_sites = extract_sync_sites(form_map, inspection_body, content_type, sync_uuid)
     start_time = time.perf_counter()
     request_debug = build_request_debug_summary(
         content_type=content_type,
@@ -1796,6 +1890,29 @@ def build_settings_page_context(
         "notification_status": "已启用" if settings.wecom_enabled else "未配置",
         "notification_target": notification_target_summary(),
         "logout_url": "/auth/logout",
+    }
+
+
+def build_settings_page_context(
+    request: Request,
+    *,
+    message: str = "",
+    error: str = "",
+    form_overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    settings_form = managed_settings_snapshot()
+    if form_overrides:
+        settings_form.update({key: value for key, value in form_overrides.items() if key in settings_form})
+    return {
+        "request": request,
+        "settings_form": settings_form,
+        "message": message,
+        "error": error,
+        "dashboard_username": request.session.get("username") or settings.dashboard_username or "当前会话",
+        "notification_status": "已启用" if settings.wecom_enabled else "未配置",
+        "notification_target": notification_target_summary(),
+        "logout_url": "/auth/logout",
+        "encrypted_site_details_enabled": settings.encrypted_site_details_enabled,
     }
 
 
