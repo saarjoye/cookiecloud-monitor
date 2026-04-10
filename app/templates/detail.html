@@ -13,7 +13,7 @@
             <div class="topbar-copy">
                 <p class="eyebrow">同步详情</p>
                 <h1>同步详情 #{{ log.id }}</h1>
-                <p class="subtle">这里展示单次同步请求的元数据、响应摘要，以及本次可解析到的站点明细。</p>
+                <p class="subtle">这里展示单次同步请求的元数据、同步站点明细，以及上游响应摘录。</p>
             </div>
             <div class="topbar-tools">
                 <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
@@ -33,7 +33,7 @@
             </div>
             <div class="detail-highlight">
                 <span class="metric-label">UUID</span>
-                <strong><code>{{ log.sync_uuid or 'unknown' }}</code></strong>
+                <strong><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别' }}</code></strong>
                 <small>客户端 {{ log.client_ip or '-' }}</small>
             </div>
             <div class="detail-highlight">
@@ -53,9 +53,9 @@
             <div class="table-shell">
                 <table class="detail-table">
                     <tbody>
-                        <tr><th>时间</th><td>{{ log.occurred_at }}</td></tr>
+                        <tr><th>记录时间</th><td>{{ log.occurred_at }}</td></tr>
                         <tr><th>动作</th><td>{{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}</td></tr>
-                        <tr><th>UUID</th><td><code>{{ log.sync_uuid or 'unknown' }}</code></td></tr>
+                        <tr><th>UUID</th><td><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别' }}</code></td></tr>
                         <tr><th>结果</th><td>{{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}</td></tr>
                         <tr><th>HTTP 状态码</th><td>{{ log.http_status or '-' }}</td></tr>
                         <tr><th>请求方法</th><td>{{ log.request_method }}</td></tr>
@@ -63,7 +63,6 @@
                         <tr><th>查询参数</th><td><code>{{ log.query_string or '-' }}</code></td></tr>
                         <tr><th>客户端 IP</th><td>{{ log.client_ip or '-' }}</td></tr>
                         <tr><th>浏览器标识</th><td>{{ log.user_agent or '-' }}</td></tr>
-                        <tr><th>请求耗时</th><td>{{ log.duration_ms }} ms</td></tr>
                         <tr><th>请求体大小</th><td>{{ log.payload_size }} bytes</td></tr>
                         <tr><th>请求摘要</th><td><code>{{ log.payload_hash or '-' }}</code></td></tr>
                         <tr><th>响应大小</th><td>{{ log.response_size }} bytes</td></tr>

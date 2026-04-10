@@ -13,16 +13,16 @@
             <div class="topbar-copy">
                 <p class="eyebrow">系统设置</p>
                 <h1>系统设置</h1>
-                <p class="subtle">在这里配置 CookieCloud 上游地址、监控参数、登录账号和企业微信应用推送。</p>
+                <p class="subtle">在这里配置上游 CookieCloud 地址、仪表盘登录账号，以及企业微信应用推送参数。</p>
             </div>
             <div class="topbar-tools">
                 <div class="tool-chip">
-                    <span class="tool-chip-label">通知状态</span>
-                    <strong>{{ notification_status }}</strong>
+                    <span class="tool-chip-label">企业微信推送</span>
+                    <strong>{{ '已配置' if settings_form.wecom_corp_id and settings_form.wecom_agent_id and settings_form.wecom_secret else '未配置' }}</strong>
                 </div>
                 <div class="tool-chip">
-                    <span class="tool-chip-label">通知目标</span>
-                    <strong>{{ notification_target }}</strong>
+                    <span class="tool-chip-label">当前账号</span>
+                    <strong>{{ settings_form.dashboard_username or dashboard_username or '当前会话' }}</strong>
                 </div>
                 <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
                 <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
@@ -46,15 +46,15 @@
             <div class="help-grid">
                 <article class="help-card">
                     <strong>当前方案是前置代理模式</strong>
-                    <p>浏览器插件请求先到 Monitor，再由 Monitor 转发到真正的 CookieCloud。</p>
+                    <p>浏览器插件先请求 Monitor，再由 Monitor 转发到真正的 CookieCloud，监控页面和通知才能拿到数据。</p>
                 </article>
                 <article class="help-card">
                     <strong>如果插件直接请求原始 CookieCloud</strong>
                     <p>当前监控服务无法看到同步动作，也就不会生成日志、统计和推送。</p>
                 </article>
                 <article class="help-card">
-                    <strong>你可以这样部署</strong>
-                    <p>插件直接填当前 Monitor 地址，或者让原有域名先反代到 Monitor，再转发给 CookieCloud。</p>
+                    <strong>推荐部署方式</strong>
+                    <p>插件直接填写当前 Monitor 地址，或者让现有域名先反代到 Monitor，再由 Monitor 转发给 CookieCloud。</p>
                 </article>
             </div>
         </section>
@@ -68,20 +68,20 @@
                     </div>
                 </div>
                 <div class="settings-grid">
-                    <label class="field">
+                    <label class="field field-full">
                         <span>CookieCloud 上游地址</span>
                         <input type="text" name="cookiecloud_target_url" value="{{ settings_form.cookiecloud_target_url }}" placeholder="http://cookiecloud:8088" required>
-                        <small>真正的 CookieCloud 服务地址，Monitor 会把 `/update` 和 `/get/{uuid}` 转发到这里。</small>
+                        <small>真实的 CookieCloud 服务地址，Monitor 会把 `/update` 和 `/get/{uuid}` 转发到这里。</small>
                     </label>
                     <label class="field">
                         <span>时区</span>
                         <input type="text" name="timezone_name" value="{{ settings_form.timezone_name }}" placeholder="Asia/Shanghai">
-                        <small>用于页面显示与按日统计。</small>
+                        <small>用于页面显示和按日统计。</small>
                     </label>
                     <label class="field">
                         <span>最近日志条数</span>
                         <input type="number" name="recent_log_limit" value="{{ settings_form.recent_log_limit }}" min="10" step="1">
-                        <small>仪表盘最近日志表格展示条数。</small>
+                        <small>仪表盘最近同步记录的展示条数。</small>
                     </label>
                 </div>
             </section>
@@ -140,7 +140,7 @@
                         <input type="text" name="wecom_to_tag" value="{{ settings_form.wecom_to_tag }}" placeholder="3|8">
                     </label>
                 </div>
-                <p class="helper-text">只有企业微信应用参数完整，且至少配置了成员、部门或标签之一，通知才会真正发送。</p>
+                <p class="helper-text">只有企业微信应用参数完整，并且至少配置了成员、部门或标签之一，通知才会真正发送。</p>
             </section>
 
             <div class="action-row">
@@ -155,7 +155,7 @@
                     <h2>测试通知</h2>
                 </div>
             </div>
-            <p class="subtle">保存配置后，可以直接发送一条企业微信测试通知，验证应用和接收对象是否配置正确。</p>
+            <p class="subtle">保存配置后，可以直接发送一条企业微信测试通知，确认应用和接收对象是否配置正确。</p>
             <form method="post" action="/settings/test-notification" class="action-row">
                 <button class="button" type="submit">发送测试通知</button>
             </form>
@@ -174,13 +174,13 @@
                     <h3>CookieCloud 首次同步提醒</h3>
                     <pre># CookieCloud 首次同步提醒
 > UUID：`your-uuid`
-> 时间：`2026-04-09T12:30:00`
+> 时间：`2026-04-10T09:30:00`
 > 来源 IP：`192.168.1.100`
 > 当前 CK 数：`28`
 > 站点数：`6`</pre>
                 </article>
                 <article class="preview-card">
-                    <span class="preview-tag">CK 增减</span>
+                    <span class="preview-tag">CK 变化</span>
                     <h3>CookieCloud CK 数量变化</h3>
                     <pre># CookieCloud CK 数量增加
 > UUID：`your-uuid`
@@ -189,11 +189,11 @@
 > 变化值：`+8`</pre>
                 </article>
                 <article class="preview-card">
-                    <span class="preview-tag">登录成功</span>
+                    <span class="preview-tag">登录提醒</span>
                     <h3>CookieCloud 控制台登录提醒</h3>
                     <pre># CookieCloud 控制台登录提醒
 > 登录账号：`admin`
-> 时间：`2026-04-09T12:36:00`
+> 时间：`2026-04-10T09:36:00`
 > IP：`192.168.1.30`
 > UA：`Mozilla/5.0 ...`</pre>
                 </article>

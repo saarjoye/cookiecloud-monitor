@@ -381,6 +381,27 @@ def runtime_status_summary() -> dict[str, str]:
     }
 
 
+def notification_target_summary() -> str:
+    targets = []
+    if settings.wecom_to_user:
+        targets.append(f"成员 {settings.wecom_to_user}")
+    if settings.wecom_to_party:
+        targets.append(f"部门 {settings.wecom_to_party}")
+    if settings.wecom_to_tag:
+        targets.append(f"标签 {settings.wecom_to_tag}")
+    return " / ".join(targets) if targets else "未配置接收对象"
+
+
+def runtime_status_summary() -> dict[str, str]:
+    return {
+        "notification_status": "已启用" if settings.wecom_enabled else "未配置",
+        "notification_target": notification_target_summary(),
+        "proxy_mode": "前置代理模式",
+        "proxy_hint": "请让浏览器插件请求当前 Monitor 地址，或由反向代理先转到 Monitor，再转发到真正的 CookieCloud。",
+        "target_url": settings.cookiecloud_target_url,
+    }
+
+
 def normalize_form_value(value: Any) -> str:
     if value is None:
         return ""
@@ -1732,6 +1753,28 @@ def fetch_runtime_log_by_id(log_id: int) -> dict[str, Any] | None:
     with get_db_connection() as connection:
         row = connection.execute("SELECT * FROM runtime_logs WHERE id = ?", (log_id,)).fetchone()
     return dict(row) if row else None
+
+
+def build_settings_page_context(
+    request: Request,
+    *,
+    message: str = "",
+    error: str = "",
+    form_overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    settings_form = managed_settings_snapshot()
+    if form_overrides:
+        settings_form.update({key: value for key, value in form_overrides.items() if key in settings_form})
+    return {
+        "request": request,
+        "settings_form": settings_form,
+        "message": message,
+        "error": error,
+        "dashboard_username": request.session.get("username") or settings.dashboard_username or "当前会话",
+        "notification_status": "已启用" if settings.wecom_enabled else "未配置",
+        "notification_target": notification_target_summary(),
+        "logout_url": "/auth/logout",
+    }
 
 
 def build_settings_page_context(

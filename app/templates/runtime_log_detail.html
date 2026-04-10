@@ -13,7 +13,7 @@
             <div class="topbar-copy">
                 <p class="eyebrow">运行日志详情</p>
                 <h1>运行日志 #{{ log.id }}</h1>
-                <p class="subtle">查看单次异常或告警的完整消息、请求上下文与 traceback。</p>
+                <p class="subtle">查看单次异常或告警的完整消息、请求上下文和 traceback。</p>
             </div>
             <div class="topbar-tools">
                 <a class="button button-ghost" href="{{ runtime_logs_url }}">返回运行日志</a>
@@ -37,7 +37,7 @@
             </div>
             <div class="detail-highlight">
                 <span class="metric-label">UUID</span>
-                <strong><code>{{ log.sync_uuid or '-' }}</code></strong>
+                <strong><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '-' }}</code></strong>
                 <small>来源 {{ log.source }}</small>
             </div>
         </section>
@@ -62,7 +62,7 @@
                 </div>
             </div>
             <div class="excerpt-box">
-                <pre>{{ log.traceback_text or '当前日志没有 traceback，通常表示这是一次上游失败响应而不是 Python 异常。' }}</pre>
+                <pre>{{ log.traceback_text or '当前日志没有 traceback，通常表示这是一次上游失败响应，而不是 Python 异常。' }}</pre>
             </div>
         </section>
     </main>

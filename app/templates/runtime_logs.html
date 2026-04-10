@@ -12,8 +12,8 @@
         <section class="topbar panel-surface">
             <div class="topbar-copy">
                 <p class="eyebrow">运行日志</p>
-                <h1>最近 50 条应用异常与告警</h1>
-                <p class="subtle">这里会保留完整的运行异常、上游 5xx、转发失败等诊断信息。日志文件路径 <code>{{ app_log_path }}</code></p>
+                <h1>最近 50 条应用错误与告警</h1>
+                <p class="subtle">这里保留完整的运行异常、上游 5xx、转发失败和诊断告警。日志文件路径 <code>{{ app_log_path }}</code></p>
             </div>
             <div class="topbar-tools">
                 <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
@@ -23,33 +23,37 @@
 
         <section class="panel panel-surface">
             {% if logs %}
-            <div class="table-shell">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>时间</th>
-                            <th>级别</th>
-                            <th>来源</th>
-                            <th>请求</th>
-                            <th>UUID</th>
-                            <th>消息</th>
-                            <th>详情</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for log in logs %}
-                        <tr>
-                            <td>{{ log.occurred_at }}</td>
-                            <td><span class="status {% if log.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ log.level }}</span></td>
-                            <td>{{ log.source }}</td>
-                            <td><code>{{ log.request_method or '-' }} {{ log.request_path or '-' }}</code></td>
-                            <td><code>{{ log.sync_uuid or '-' }}</code></td>
-                            <td>{{ log.message }}</td>
-                            <td><a class="text-link" href="/runtime-logs/{{ log.id }}">查看</a></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <div class="log-list">
+                {% for log in logs %}
+                <article class="log-card">
+                    <div class="log-card-head">
+                        <div class="log-card-title">
+                            <strong>{{ log.occurred_at }}</strong>
+                            <p>{{ log.source }}</p>
+                        </div>
+                        <div class="log-card-badges">
+                            <span class="status {% if log.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ log.level }}</span>
+                        </div>
+                    </div>
+                    <div class="log-card-meta">
+                        <div class="meta-pair meta-pair-wide">
+                            <span class="meta-label">请求</span>
+                            <code class="meta-value">{{ log.request_method or '-' }} {{ log.request_path or '-' }}</code>
+                        </div>
+                        <div class="meta-pair">
+                            <span class="meta-label">UUID</span>
+                            <code class="meta-value">{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '-' }}</code>
+                        </div>
+                        <div class="meta-pair meta-pair-wide">
+                            <span class="meta-label">消息</span>
+                            <span class="meta-value">{{ log.message }}</span>
+                        </div>
+                    </div>
+                    <div class="log-card-actions">
+                        <a class="button" href="/runtime-logs/{{ log.id }}">查看详情</a>
+                    </div>
+                </article>
+                {% endfor %}
             </div>
             {% else %}
             <p class="empty">当前没有运行异常日志。</p>
