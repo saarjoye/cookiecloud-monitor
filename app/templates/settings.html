@@ -131,6 +131,11 @@
                         <span>应用 Secret</span>
                         <input type="password" name="wecom_secret" value="{{ settings_form.wecom_secret }}">
                     </label>
+                    <label class="field field-full">
+                        <span>企业微信 API 地址</span>
+                        <input type="text" name="wecom_api_base_url" value="{{ settings_form.wecom_api_base_url }}" placeholder="https://qyapi.weixin.qq.com">
+                        <small>默认使用企业微信官方地址。若你部署了企业微信反代，请在这里填写反代基础地址，例如 `https://wecom-proxy.example.com` 或带前缀路径的 `https://wecom-proxy.example.com/qyapi`。</small>
+                    </label>
                     <label class="field">
                         <span>接收成员</span>
                         <input type="text" name="wecom_to_user" value="{{ settings_form.wecom_to_user }}" placeholder="userid1|userid2">
@@ -144,7 +149,7 @@
                         <input type="text" name="wecom_to_tag" value="{{ settings_form.wecom_to_tag }}" placeholder="3|8">
                     </label>
                 </div>
-                <p class="helper-text">只有企业微信应用参数完整，并且至少配置了成员、部门或标签之一，通知才会真正发送。</p>
+                <p class="helper-text">只有企业微信应用参数完整，并且至少配置了成员、部门或标签之一，通知才会真正发送。若网络环境无法直连企业微信官方接口，可把“企业微信 API 地址”改成你的反代地址。</p>
             </section>
 
             <div class="action-row">

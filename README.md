@@ -99,6 +99,7 @@ http://YOUR_SERVER_IP:8090/settings
 | `WECOM_CORP_ID` | WeCom corp ID | empty |
 | `WECOM_AGENT_ID` | WeCom agent ID | empty |
 | `WECOM_SECRET` | WeCom app secret | empty |
+| `WECOM_API_BASE_URL` | WeCom API base URL or reverse-proxy base URL | `https://qyapi.weixin.qq.com` |
 | `WECOM_TO_USER` | WeCom target user(s) | empty |
 | `WECOM_TO_PARTY` | WeCom target department(s) | empty |
 | `WECOM_TO_TAG` | WeCom target tag(s) | empty |
@@ -112,6 +113,8 @@ When WeCom credentials are configured, the service can send markdown notificatio
 - CK count increase
 - CK count decrease
 - Payload updates when the payload hash changes
+
+If your environment cannot reach the official WeCom API directly, set `WECOM_API_BASE_URL` to your reverse-proxy base URL. The monitor will use that base URL for both `/cgi-bin/gettoken` and `/cgi-bin/message/send`.
 
 CK count tracking is best-effort. If CookieCloud sends only encrypted payloads, the proxy can still detect first syncs and payload updates, but may not be able to calculate exact CK counts.
 Site detail extraction is also best-effort. When the extension uploads only encrypted payloads, configure `COOKIECLOUD_SYNC_PASSWORD` so the monitor can decrypt the payload in memory and extract only site metadata. Without that password, site name/domain cannot be reconstructed.

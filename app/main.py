@@ -48,6 +48,7 @@ class Settings:
     wecom_corp_id: str
     wecom_agent_id: str
     wecom_secret: str
+    wecom_api_base_url: str
     wecom_to_user: str
     wecom_to_party: str
     wecom_to_tag: str
@@ -90,6 +91,7 @@ class Settings:
             wecom_corp_id=os.getenv("WECOM_CORP_ID", ""),
             wecom_agent_id=os.getenv("WECOM_AGENT_ID", ""),
             wecom_secret=os.getenv("WECOM_SECRET", ""),
+            wecom_api_base_url=(os.getenv("WECOM_API_BASE_URL", "https://qyapi.weixin.qq.com").strip() or "https://qyapi.weixin.qq.com").rstrip("/"),
             wecom_to_user=os.getenv("WECOM_TO_USER", ""),
             wecom_to_party=os.getenv("WECOM_TO_PARTY", ""),
             wecom_to_tag=os.getenv("WECOM_TO_TAG", ""),
@@ -242,6 +244,7 @@ MANAGED_SETTING_KEYS = {
     "wecom_corp_id",
     "wecom_agent_id",
     "wecom_secret",
+    "wecom_api_base_url",
     "wecom_to_user",
     "wecom_to_party",
     "wecom_to_tag",
@@ -364,10 +367,15 @@ def managed_settings_snapshot() -> dict[str, str]:
         "wecom_corp_id": settings.wecom_corp_id,
         "wecom_agent_id": settings.wecom_agent_id,
         "wecom_secret": settings.wecom_secret,
+        "wecom_api_base_url": settings.wecom_api_base_url,
         "wecom_to_user": settings.wecom_to_user,
         "wecom_to_party": settings.wecom_to_party,
         "wecom_to_tag": settings.wecom_to_tag,
     }
+
+
+def build_wecom_api_url(path: str) -> str:
+    return f"{settings.wecom_api_base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
 def notification_target_summary() -> str:
@@ -1012,13 +1020,18 @@ def update_sync_state(
 
 async def get_wecom_access_token() -> str:
     now_ts = time.time()
+    cache_key = f"{settings.wecom_api_base_url}|{settings.wecom_corp_id}|{settings.wecom_secret}"
     cached_token = WECOM_TOKEN_CACHE.get("access_token")
-    if cached_token and now_ts < float(WECOM_TOKEN_CACHE.get("expires_at", 0)):
+    if (
+        cached_token
+        and WECOM_TOKEN_CACHE.get("cache_key") == cache_key
+        and now_ts < float(WECOM_TOKEN_CACHE.get("expires_at", 0))
+    ):
         return str(cached_token)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(
-            "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+            build_wecom_api_url("/cgi-bin/gettoken"),
             params={"corpid": settings.wecom_corp_id, "corpsecret": settings.wecom_secret},
         )
         response.raise_for_status()
@@ -1030,6 +1043,7 @@ async def get_wecom_access_token() -> str:
     expires_in = int(payload.get("expires_in", 7200))
     token = str(payload["access_token"])
     WECOM_TOKEN_CACHE["access_token"] = token
+    WECOM_TOKEN_CACHE["cache_key"] = cache_key
     WECOM_TOKEN_CACHE["expires_at"] = now_ts + max(expires_in - 120, 60)
     return token
 
@@ -1060,7 +1074,7 @@ async def send_wecom_markdown(title: str, body_lines: list[str]) -> None:
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
-            "https://qyapi.weixin.qq.com/cgi-bin/message/send",
+            build_wecom_api_url("/cgi-bin/message/send"),
             params={"access_token": token},
             json=message_payload,
         )
@@ -2449,6 +2463,7 @@ async def update_settings(
     wecom_corp_id: str = Form(""),
     wecom_agent_id: str = Form(""),
     wecom_secret: str = Form(""),
+    wecom_api_base_url: str = Form("https://qyapi.weixin.qq.com"),
     wecom_to_user: str = Form(""),
     wecom_to_party: str = Form(""),
     wecom_to_tag: str = Form(""),
@@ -2466,6 +2481,7 @@ async def update_settings(
         "wecom_corp_id": wecom_corp_id.strip(),
         "wecom_agent_id": wecom_agent_id.strip(),
         "wecom_secret": wecom_secret.strip(),
+        "wecom_api_base_url": (wecom_api_base_url.strip() or "https://qyapi.weixin.qq.com").rstrip("/"),
         "wecom_to_user": wecom_to_user.strip(),
         "wecom_to_party": wecom_to_party.strip(),
         "wecom_to_tag": wecom_to_tag.strip(),
@@ -2491,6 +2507,17 @@ async def update_settings(
             build_settings_page_context(
                 request,
                 error="时区格式无效，请填写例如 Asia/Shanghai。",
+                form_overrides=form_values,
+            ),
+            status_code=400,
+        )
+
+    if not cleaned_values["wecom_api_base_url"].startswith(("http://", "https://")):
+        return TEMPLATES.TemplateResponse(
+            "settings.html",
+            build_settings_page_context(
+                request,
+                error="企业微信 API 地址必须以 http:// 或 https:// 开头。",
                 form_overrides=form_values,
             ),
             status_code=400,
