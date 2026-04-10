@@ -91,6 +91,11 @@
                         <input type="number" name="recent_log_limit" value="{{ settings_form.recent_log_limit }}" min="10" step="1">
                         <small>仪表盘最近同步记录的展示条数。</small>
                     </label>
+                    <label class="field field-full">
+                        <span>通知外部访问地址</span>
+                        <input type="text" name="notification_public_base_url" value="{{ settings_form.notification_public_base_url }}" placeholder="https://monitor.example.com">
+                        <small>用于企业微信图文消息里的跳转链接和封面图地址。这里请填写企业微信和微信客户端都能直接访问的公网地址，而不是内网 IP。留空时会回退为当前请求地址。</small>
+                    </label>
                 </div>
             </section>
 
@@ -203,6 +208,7 @@ UUID：your-uuid
 站点数：6
 上传站点：京东、淘宝、Bilibili、GitHub、百度、阿里云
 链接：https://your-monitor.example.com/logs/128</pre>
+                    <p class="helper-text">图文封面会从“通知外部访问地址”拼接出的 `https://your-monitor.example.com/static/wecom-card.png` 拉取。</p>
                 </article>
                 <article class="preview-card">
                     <span class="preview-tag">text 文本</span>

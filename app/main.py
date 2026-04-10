@@ -45,6 +45,7 @@ class Settings:
     session_secret: str
     session_cookie_name: str
     session_max_age: int
+    notification_public_base_url: str
     wecom_corp_id: str
     wecom_agent_id: str
     wecom_secret: str
@@ -89,6 +90,7 @@ class Settings:
             session_secret=os.getenv("SESSION_SECRET", "") or secrets.token_hex(32),
             session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "cookiecloud_monitor_session"),
             session_max_age=max(int(os.getenv("SESSION_MAX_AGE", "1209600")), 3600),
+            notification_public_base_url=os.getenv("NOTIFICATION_PUBLIC_BASE_URL", "").strip().rstrip("/"),
             wecom_corp_id=os.getenv("WECOM_CORP_ID", ""),
             wecom_agent_id=os.getenv("WECOM_AGENT_ID", ""),
             wecom_secret=os.getenv("WECOM_SECRET", ""),
@@ -247,6 +249,7 @@ MANAGED_SETTING_KEYS = {
     "dashboard_username",
     "dashboard_password",
     "recent_log_limit",
+    "notification_public_base_url",
     "wecom_corp_id",
     "wecom_agent_id",
     "wecom_secret",
@@ -391,6 +394,7 @@ def managed_settings_snapshot() -> dict[str, str]:
         "dashboard_username": settings.dashboard_username,
         "dashboard_password": settings.dashboard_password,
         "recent_log_limit": str(settings.recent_log_limit),
+        "notification_public_base_url": settings.notification_public_base_url,
         "wecom_corp_id": settings.wecom_corp_id,
         "wecom_agent_id": settings.wecom_agent_id,
         "wecom_secret": settings.wecom_secret,
@@ -412,7 +416,7 @@ def normalize_wecom_message_type(value: str | None = None) -> str:
 
 
 def build_monitor_page_url(request: Request, path: str) -> str:
-    base = str(request.base_url).rstrip("/")
+    base = settings.notification_public_base_url or str(request.base_url).rstrip("/")
     relative_path = path if path.startswith("/") else f"/{path}"
     return f"{base}{relative_path}"
 
@@ -462,12 +466,12 @@ def build_wecom_news_articles(
                 description = f"{description[:217]}..."
             articles.append(
                 {
-                    "title": str(item.get("title") or title)[:64],
-                    "description": description or "点击查看 CookieCloud Monitor 详情",
-                    "url": str(item.get("url") or build_monitor_page_url(request, target_path)),
-                    "picurl": str(item.get("picurl") or build_monitor_page_url(request, "/static/wecom-card.svg")),
-                }
-            )
+                "title": str(item.get("title") or title)[:64],
+                "description": description or "点击查看 CookieCloud Monitor 详情",
+                "url": str(item.get("url") or build_monitor_page_url(request, target_path)),
+                "picurl": str(item.get("picurl") or build_monitor_page_url(request, "/static/wecom-card.png")),
+            }
+        )
     return articles[:8]
 
 
@@ -2832,6 +2836,7 @@ async def update_settings(
     cookiecloud_target_url: str = Form(...),
     timezone_name: str = Form("Asia/Shanghai"),
     recent_log_limit: str = Form("50"),
+    notification_public_base_url: str = Form(""),
     dashboard_username: str = Form(""),
     dashboard_password: str = Form(""),
     wecom_corp_id: str = Form(""),
@@ -2851,6 +2856,7 @@ async def update_settings(
         "cookiecloud_target_url": cookiecloud_target_url.strip().rstrip("/"),
         "timezone_name": timezone_name.strip() or "Asia/Shanghai",
         "recent_log_limit": recent_log_limit.strip() or "50",
+        "notification_public_base_url": notification_public_base_url.strip().rstrip("/"),
         "dashboard_username": dashboard_username.strip(),
         "dashboard_password": dashboard_password.strip(),
         "wecom_corp_id": wecom_corp_id.strip(),
@@ -2883,6 +2889,19 @@ async def update_settings(
             build_settings_page_context(
                 request,
                 error="时区格式无效，请填写例如 Asia/Shanghai。",
+                form_overrides=form_values,
+            ),
+            status_code=400,
+        )
+
+    if cleaned_values["notification_public_base_url"] and not cleaned_values["notification_public_base_url"].startswith(
+        ("http://", "https://")
+    ):
+        return TEMPLATES.TemplateResponse(
+            "settings.html",
+            build_settings_page_context(
+                request,
+                error="通知外部访问地址必须以 http:// 或 https:// 开头。",
                 form_overrides=form_values,
             ),
             status_code=400,

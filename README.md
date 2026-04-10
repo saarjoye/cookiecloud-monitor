@@ -93,6 +93,7 @@ http://YOUR_SERVER_IP:8090/settings
 | `DASHBOARD_USERNAME` | Dashboard username | empty |
 | `DASHBOARD_PASSWORD` | Dashboard password | empty |
 | `RECENT_LOG_LIMIT` | Recent log rows on dashboard | `50` |
+| `NOTIFICATION_PUBLIC_BASE_URL` | Public base URL used in WeCom news links and cover images | empty |
 | `SESSION_SECRET` | Session signing secret | random at boot if empty |
 | `SESSION_COOKIE_NAME` | Session cookie name | `cookiecloud_monitor_session` |
 | `SESSION_MAX_AGE` | Session lifetime in seconds | `1209600` |
@@ -117,6 +118,7 @@ When WeCom credentials are configured, the service can send `news` or `text` not
 
 If your environment cannot reach the official WeCom API directly, set `WECOM_API_BASE_URL` to your reverse-proxy base URL. The monitor will use that base URL for both `/cgi-bin/gettoken` and `/cgi-bin/message/send`.
 The default message type is `news`, which is usually friendlier in WeChat. If your app is restricted to plain text, switch `WECOM_MESSAGE_TYPE=text`.
+If WeCom news cards show a blank cover area, set `NOTIFICATION_PUBLIC_BASE_URL` to the public URL that WeCom/WeChat can reach. The monitor will use it to build the news article URL and the cover image URL.
 
 CK count tracking is best-effort. If CookieCloud sends only encrypted payloads, the proxy can still detect first syncs and payload updates, but may not be able to calculate exact CK counts.
 Site detail extraction is also best-effort. When the extension uploads only encrypted payloads, configure `COOKIECLOUD_SYNC_PASSWORD` so the monitor can decrypt the payload in memory and extract only site metadata. Without that password, site name/domain cannot be reconstructed.
