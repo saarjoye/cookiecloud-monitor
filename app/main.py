@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import gzip
 import hashlib
 import json
@@ -1971,6 +1972,192 @@ def fetch_site_catalog(
     return {"items": items, "summary": summary}
 
 
+def fetch_known_sync_uuids(sync_uuid: str | None = None) -> list[str]:
+    normalized_sync_uuid = (sync_uuid or "").strip()
+    if normalized_sync_uuid:
+        return [normalized_sync_uuid]
+
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT sync_uuid
+            FROM sync_states
+            WHERE sync_uuid IS NOT NULL AND sync_uuid != ''
+            ORDER BY last_sync_at DESC
+            """
+        ).fetchall()
+    return [str(row["sync_uuid"]) for row in rows]
+
+
+def fetch_latest_uuid_status_map(sync_uuids: list[str]) -> dict[str, dict[str, Any]]:
+    if not sync_uuids:
+        return {}
+
+    placeholders = ",".join("?" for _ in sync_uuids)
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            f"""
+            WITH latest_log AS (
+                SELECT
+                    COALESCE(sync_uuid, 'unknown') AS sync_uuid,
+                    occurred_at,
+                    outcome,
+                    http_status,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(sync_uuid, 'unknown')
+                        ORDER BY occurred_at DESC, id DESC
+                    ) AS rn
+                FROM sync_logs
+                WHERE COALESCE(sync_uuid, 'unknown') IN ({placeholders})
+            )
+            SELECT sync_uuid, occurred_at, outcome, http_status, id
+            FROM latest_log
+            WHERE rn = 1
+            """,
+            sync_uuids,
+        ).fetchall()
+    return {str(row["sync_uuid"]): dict(row) for row in rows}
+
+
+def fetch_latest_recorded_sites_by_uuid(sync_uuids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    if not sync_uuids:
+        return {}
+
+    placeholders = ",".join("?" for _ in sync_uuids)
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            f"""
+            WITH latest_site AS (
+                SELECT
+                    sync_uuid,
+                    synced_at,
+                    site_name,
+                    site_domain,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(sync_uuid, 'unknown'), site_domain
+                        ORDER BY synced_at DESC, id DESC
+                    ) AS rn
+                FROM sync_sites
+                WHERE COALESCE(sync_uuid, 'unknown') IN ({placeholders})
+            )
+            SELECT sync_uuid, synced_at, site_name, site_domain
+            FROM latest_site
+            WHERE rn = 1
+            ORDER BY synced_at DESC, site_domain ASC
+            """,
+            sync_uuids,
+        ).fetchall()
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["sync_uuid"]), []).append(dict(row))
+    return grouped
+
+
+async def fetch_live_sites_for_uuid(sync_uuid: str) -> list[dict[str, str]]:
+    try:
+        upstream_response = await forward_to_cookiecloud(method="GET", path=f"/get/{sync_uuid}")
+    except Exception:
+        return []
+
+    if not (200 <= upstream_response.status_code < 300):
+        return []
+
+    return extract_sync_sites(
+        {},
+        upstream_response.content,
+        upstream_response.headers.get("content-type", ""),
+        sync_uuid,
+    )
+
+
+async def build_live_site_catalog(
+    *,
+    sync_uuid: str | None = None,
+    keyword: str | None = None,
+    outcome: str | None = None,
+) -> dict[str, Any]:
+    sync_uuids = fetch_known_sync_uuids(sync_uuid)
+    if not sync_uuids:
+        return {"items": [], "summary": {"total_sites": 0, "success_sites": 0, "failed_sites": 0, "tracked_uuids": 0}}
+
+    latest_status_map = fetch_latest_uuid_status_map(sync_uuids)
+    recorded_site_map = fetch_latest_recorded_sites_by_uuid(sync_uuids)
+    semaphore = asyncio.Semaphore(6)
+
+    async def worker(uuid_value: str) -> tuple[str, list[dict[str, str]]]:
+        async with semaphore:
+            live_sites = await fetch_live_sites_for_uuid(uuid_value)
+        return uuid_value, live_sites
+
+    live_results = await asyncio.gather(*(worker(item) for item in sync_uuids))
+    live_site_map = {uuid_value: sites for uuid_value, sites in live_results}
+
+    items: list[dict[str, Any]] = []
+    lowered_keyword = (keyword or "").strip().lower()
+    normalized_outcome = (outcome or "").strip()
+
+    for uuid_value in sync_uuids:
+        latest_log = latest_status_map.get(uuid_value, {})
+        latest_outcome = str(latest_log.get("outcome") or "success")
+        latest_time = str(latest_log.get("occurred_at") or "")
+        site_rows = live_site_map.get(uuid_value) or recorded_site_map.get(uuid_value, [])
+
+        for site in site_rows:
+            item = {
+                "sync_uuid": uuid_value,
+                "site_name": str(site["site_name"]),
+                "site_domain": str(site["site_domain"]),
+                "latest_status": latest_outcome,
+                "latest_status_label": "成功" if latest_outcome == "success" else "失败",
+                "latest_sync_at": latest_time or str(site.get("synced_at") or "-"),
+                "synced_at": str(site.get("synced_at") or latest_time or "-"),
+                "detail_log_id": latest_log.get("id"),
+            }
+
+            if normalized_outcome and item["latest_status"] != normalized_outcome:
+                continue
+            if lowered_keyword:
+                haystacks = (
+                    item["site_name"].lower(),
+                    item["site_domain"].lower(),
+                    item["sync_uuid"].lower(),
+                )
+                if not any(lowered_keyword in value for value in haystacks):
+                    continue
+
+            items.append(item)
+
+    summary = {
+        "total_sites": len(items),
+        "success_sites": sum(1 for item in items if item["latest_status"] == "success"),
+        "failed_sites": sum(1 for item in items if item["latest_status"] == "failed"),
+        "tracked_uuids": len({item["sync_uuid"] for item in items}),
+    }
+    return {"items": items, "summary": summary}
+
+
+async def build_log_site_preview_map(sync_uuids: list[str]) -> dict[str, dict[str, Any]]:
+    known_sync_uuids = [item for item in sync_uuids if item and item != "unknown"]
+    if not known_sync_uuids:
+        return {}
+
+    semaphore = asyncio.Semaphore(6)
+
+    async def worker(uuid_value: str) -> tuple[str, list[dict[str, str]]]:
+        async with semaphore:
+            return uuid_value, await fetch_live_sites_for_uuid(uuid_value)
+
+    results = await asyncio.gather(*(worker(item) for item in known_sync_uuids))
+    preview_map: dict[str, dict[str, Any]] = {}
+    for uuid_value, sites in results:
+        preview_map[uuid_value] = {
+            "site_count": len(sites),
+            "site_preview": [item["site_domain"] for item in sites[:3]],
+        }
+    return preview_map
+
+
 def fetch_recent_auth_events(limit: int = 8) -> list[dict[str, Any]]:
     with get_db_connection() as connection:
         rows = connection.execute(
@@ -2069,6 +2256,7 @@ def build_settings_page_context(
         "notification_target": notification_target_summary(),
         "logout_url": "/auth/logout",
         "encrypted_site_details_enabled": settings.encrypted_site_details_enabled,
+        "active_nav": "settings",
     }
 
 
@@ -2086,6 +2274,17 @@ async def dashboard(
 
     summary = fetch_summary_data()
     logs = fetch_recent_logs(sync_uuid=sync_uuid, action=action, outcome=outcome, day=day)
+    log_preview_map = await build_log_site_preview_map(
+        [str(item["sync_uuid"]) for item in logs if item.get("sync_uuid") and item.get("sync_uuid") != "unknown"]
+    )
+    for item in logs:
+        if item.get("site_count"):
+            continue
+        preview = log_preview_map.get(str(item.get("sync_uuid") or ""))
+        if not preview:
+            continue
+        item["site_count"] = preview["site_count"]
+        item["site_preview"] = preview["site_preview"]
     auth_events = fetch_recent_auth_events()
     runtime_logs = fetch_recent_runtime_logs()
     status = runtime_status_summary()
@@ -2115,6 +2314,7 @@ async def dashboard(
             "sites_url": "/sites",
             "runtime_logs_url": "/runtime-logs",
             "app_log_path": str(settings.app_log_path),
+            "active_nav": "dashboard",
         },
     )
 
@@ -2259,13 +2459,29 @@ async def log_detail(
         row = connection.execute("SELECT * FROM sync_logs WHERE id = ?", (log_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="日志不存在")
+    log = dict(row)
+    sites = fetch_sync_sites_for_log(log_id)
+    if not sites and log.get("sync_uuid") and log.get("sync_uuid") != "unknown":
+        live_sites = await fetch_live_sites_for_uuid(str(log["sync_uuid"]))
+        sites = [
+            {
+                "sync_log_id": log_id,
+                "sync_uuid": log["sync_uuid"],
+                "synced_at": log["occurred_at"],
+                "site_name": item["site_name"],
+                "site_domain": item["site_domain"],
+            }
+            for item in live_sites
+        ]
     return TEMPLATES.TemplateResponse(
         "detail.html",
         {
             "request": request,
-            "log": dict(row),
-            "sites": fetch_sync_sites_for_log(log_id),
+            "log": log,
+            "sites": sites,
             "sites_url": "/sites",
+            "dashboard_username": request.session.get("username") or settings.dashboard_username or "Monitor",
+            "active_nav": "detail",
         },
     )
 
@@ -2281,7 +2497,7 @@ async def sites_page(
     if redirect is not None:
         return redirect
 
-    site_catalog = fetch_site_catalog(sync_uuid=sync_uuid, keyword=keyword, outcome=outcome)
+    site_catalog = await build_live_site_catalog(sync_uuid=sync_uuid, keyword=keyword, outcome=outcome)
     return TEMPLATES.TemplateResponse(
         "sites.html",
         {
@@ -2296,6 +2512,8 @@ async def sites_page(
             "dashboard_url": "/dashboard",
             "runtime_logs_url": "/runtime-logs",
             "logout_url": "/auth/logout",
+            "dashboard_username": request.session.get("username") or settings.dashboard_username or "Monitor",
+            "active_nav": "sites",
         },
     )
 
@@ -2314,6 +2532,8 @@ async def runtime_logs_page(request: Request) -> Response:
             "logout_url": "/auth/logout",
             "dashboard_url": "/dashboard",
             "app_log_path": str(settings.app_log_path),
+            "dashboard_username": request.session.get("username") or settings.dashboard_username or "Monitor",
+            "active_nav": "runtime_logs",
         },
     )
 
@@ -2335,6 +2555,8 @@ async def runtime_log_detail(log_id: int, request: Request) -> Response:
             "log": log,
             "dashboard_url": "/dashboard",
             "runtime_logs_url": "/runtime-logs",
+            "dashboard_username": request.session.get("username") or settings.dashboard_username or "Monitor",
+            "active_nav": "runtime_logs",
         },
     )
 
@@ -2365,4 +2587,4 @@ async def api_sites(
     outcome: str | None = Query(default=None),
 ) -> dict[str, Any]:
     require_api_auth(request)
-    return fetch_site_catalog(sync_uuid=sync_uuid, keyword=keyword, outcome=outcome)
+    return await build_live_site_catalog(sync_uuid=sync_uuid, keyword=keyword, outcome=outcome)

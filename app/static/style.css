@@ -302,6 +302,18 @@ pre {
     min-width: min(100%, 640px);
 }
 
+.dashboard-header {
+    margin-bottom: 18px;
+}
+
+.dashboard-header-tools {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 14px;
+    min-width: 240px;
+}
+
 .header-chip-row,
 .topbar-tools,
 .action-row,
@@ -356,6 +368,11 @@ pre {
     background: rgba(255, 255, 255, 0.92);
     border: 1px solid var(--line);
     box-shadow: var(--shadow);
+}
+
+.console-search-wide {
+    width: 100%;
+    margin-bottom: 20px;
 }
 
 .console-search input {

@@ -7,64 +7,70 @@
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-    <main class="page page-shell page-narrow">
-        <section class="topbar panel-surface">
-            <div class="topbar-copy">
-                <p class="eyebrow">运行日志详情</p>
-                <h1>运行日志 #{{ log.id }}</h1>
-                <p class="subtle">查看单次异常或告警的完整消息、请求上下文和 traceback。</p>
-            </div>
-            <div class="topbar-tools">
-                <a class="button button-ghost" href="{{ runtime_logs_url }}">返回运行日志</a>
-                <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
-            </div>
-        </section>
+<body class="console-body">
+    <div class="console-shell">
+        {% include "partials/sidebar.html" %}
 
-        <section class="detail-hero panel-surface">
-            <div class="detail-highlight">
-                <span class="metric-label">级别</span>
-                <div class="detail-highlight-row">
-                    <strong>{{ log.level }}</strong>
-                    <span class="status {% if log.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ log.source }}</span>
-                </div>
-                <small>发生时间 {{ log.occurred_at }}</small>
-            </div>
-            <div class="detail-highlight">
-                <span class="metric-label">请求</span>
-                <strong><code>{{ log.request_method or '-' }} {{ log.request_path or '-' }}</code></strong>
-                <small>客户端 {{ log.client_ip or '-' }}</small>
-            </div>
-            <div class="detail-highlight">
-                <span class="metric-label">UUID</span>
-                <strong><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '-' }}</code></strong>
-                <small>来源 {{ log.source }}</small>
-            </div>
-        </section>
+        <main class="console-main">
+            <div class="page page-shell page-narrow">
+                <section class="topbar panel-surface">
+                    <div class="topbar-copy">
+                        <p class="eyebrow">运行日志详情</p>
+                        <h1>运行日志 #{{ log.id }}</h1>
+                        <p class="subtle">查看单次异常或告警的完整消息、请求上下文和 traceback。</p>
+                    </div>
+                    <div class="topbar-tools">
+                        <a class="button button-ghost" href="{{ runtime_logs_url }}">返回运行日志</a>
+                        <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
+                    </div>
+                </section>
 
-        <section class="panel panel-surface">
-            <div class="panel-head">
-                <div>
-                    <p class="section-kicker">消息</p>
-                    <h2>异常摘要</h2>
-                </div>
-            </div>
-            <div class="excerpt-box">
-                <pre>{{ log.message }}</pre>
-            </div>
-        </section>
+                <section class="detail-hero panel-surface">
+                    <div class="detail-highlight">
+                        <span class="metric-label">级别</span>
+                        <div class="detail-highlight-row">
+                            <strong>{{ log.level }}</strong>
+                            <span class="status {% if log.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ log.source }}</span>
+                        </div>
+                        <small>发生时间 {{ log.occurred_at }}</small>
+                    </div>
+                    <div class="detail-highlight">
+                        <span class="metric-label">请求</span>
+                        <strong><code>{{ log.request_method or '-' }} {{ log.request_path or '-' }}</code></strong>
+                        <small>客户端 {{ log.client_ip or '-' }}</small>
+                    </div>
+                    <div class="detail-highlight">
+                        <span class="metric-label">UUID</span>
+                        <strong><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '-' }}</code></strong>
+                        <small>来源 {{ log.source }}</small>
+                    </div>
+                </section>
 
-        <section class="panel panel-surface">
-            <div class="panel-head">
-                <div>
-                    <p class="section-kicker">堆栈</p>
-                    <h2>完整 Traceback</h2>
-                </div>
+                <section class="panel panel-surface">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">消息</p>
+                            <h2>异常摘要</h2>
+                        </div>
+                    </div>
+                    <div class="excerpt-box">
+                        <pre>{{ log.message }}</pre>
+                    </div>
+                </section>
+
+                <section class="panel panel-surface">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">堆栈</p>
+                            <h2>完整 Traceback</h2>
+                        </div>
+                    </div>
+                    <div class="excerpt-box">
+                        <pre>{{ log.traceback_text or '当前日志没有 traceback，通常表示这是一次上游失败响应，而不是 Python 异常。' }}</pre>
+                    </div>
+                </section>
             </div>
-            <div class="excerpt-box">
-                <pre>{{ log.traceback_text or '当前日志没有 traceback，通常表示这是一次上游失败响应，而不是 Python 异常。' }}</pre>
-            </div>
-        </section>
-    </main>
+        </main>
+    </div>
 </body>
 </html>

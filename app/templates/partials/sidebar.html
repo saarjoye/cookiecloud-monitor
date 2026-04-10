@@ -1,0 +1,56 @@
+<aside class="console-sidebar">
+    <div class="sidebar-brand">
+        <div class="brand-badge">C</div>
+        <div>
+            <strong>COOKIEPILOT</strong>
+            <span>CookieCloud Monitor Console</span>
+        </div>
+    </div>
+
+    <nav class="sidebar-nav">
+        <div class="sidebar-group">
+            <span class="sidebar-group-title">总览</span>
+            <a class="sidebar-link {% if active_nav == 'dashboard' %}active{% endif %}" href="/dashboard">
+                <span class="sidebar-icon">01</span>
+                <span>监控首页</span>
+            </a>
+            <a class="sidebar-link {% if active_nav == 'sites' %}active{% endif %}" href="/sites">
+                <span class="sidebar-icon">SI</span>
+                <span>站点信息</span>
+            </a>
+            <a class="sidebar-link {% if active_nav == 'runtime_logs' %}active{% endif %}" href="/runtime-logs">
+                <span class="sidebar-icon">RT</span>
+                <span>运行日志</span>
+            </a>
+        </div>
+
+        <div class="sidebar-group">
+            <span class="sidebar-group-title">管理</span>
+            <a class="sidebar-link {% if active_nav == 'settings' %}active{% endif %}" href="/settings">
+                <span class="sidebar-icon">ST</span>
+                <span>系统设置</span>
+            </a>
+            <a class="sidebar-link {% if active_nav == 'detail' %}active{% endif %}" href="/dashboard#sync-log-board">
+                <span class="sidebar-icon">LG</span>
+                <span>同步日志</span>
+            </a>
+        </div>
+
+        <div class="sidebar-group">
+            <span class="sidebar-group-title">账户</span>
+            <a class="sidebar-link" href="/auth/logout">
+                <span class="sidebar-icon">OT</span>
+                <span>退出登录</span>
+            </a>
+        </div>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="sidebar-footer-title">当前会话</div>
+        <div class="sidebar-footer-user">{{ dashboard_username or "Monitor" }}</div>
+        <div class="sidebar-footer-meta">
+            <span class="live-dot"></span>
+            <span>服务运行中</span>
+        </div>
+    </div>
+</aside>

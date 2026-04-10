@@ -9,98 +9,32 @@
 </head>
 <body class="console-body">
     <div class="console-shell">
-        <aside class="console-sidebar">
-            <div class="sidebar-brand">
-                <div class="brand-badge">C</div>
-                <div>
-                    <strong>COOKIEPILOT</strong>
-                    <span>CookieCloud Monitor Console</span>
-                </div>
-            </div>
-
-            <nav class="sidebar-nav">
-                <div class="sidebar-group">
-                    <span class="sidebar-group-title">总览</span>
-                    <a class="sidebar-link active" href="/dashboard">
-                        <span class="sidebar-icon">01</span>
-                        <span>监控首页</span>
-                    </a>
-                    <a class="sidebar-link" href="#recent-sync">
-                        <span class="sidebar-icon">02</span>
-                        <span>同步动态</span>
-                    </a>
-                    <a class="sidebar-link" href="#sync-log-board">
-                        <span class="sidebar-icon">03</span>
-                        <span>同步明细</span>
-                    </a>
-                </div>
-
-                <div class="sidebar-group">
-                    <span class="sidebar-group-title">管理</span>
-                    <a class="sidebar-link" href="{{ settings_url }}">
-                        <span class="sidebar-icon">ST</span>
-                        <span>系统设置</span>
-                    </a>
-                    <a class="sidebar-link" href="{{ sites_url }}">
-                        <span class="sidebar-icon">SI</span>
-                        <span>绔欑偣淇℃伅</span>
-                    </a>
-                    <a class="sidebar-link" href="{{ runtime_logs_url }}">
-                        <span class="sidebar-icon">RT</span>
-                        <span>运行日志</span>
-                    </a>
-                    <a class="sidebar-link" href="#uuid-board">
-                        <span class="sidebar-icon">ID</span>
-                        <span>UUID 汇总</span>
-                    </a>
-                </div>
-
-                <div class="sidebar-group">
-                    <span class="sidebar-group-title">账户</span>
-                    <a class="sidebar-link" href="{{ logout_url }}">
-                        <span class="sidebar-icon">OT</span>
-                        <span>退出登录</span>
-                    </a>
-                </div>
-            </nav>
-
-            <div class="sidebar-footer">
-                <div class="sidebar-footer-title">当前会话</div>
-                <div class="sidebar-footer-user">{{ dashboard_username or "Monitor" }}</div>
-                <div class="sidebar-footer-meta">
-                    <span class="live-dot"></span>
-                    <span>服务运行中</span>
-                </div>
-            </div>
-        </aside>
+        {% include "partials/sidebar.html" %}
 
         <main class="console-main">
-            <header class="console-header">
+            <header class="console-header dashboard-header">
                 <div class="console-header-copy">
                     <p class="eyebrow">CookieCloud Monitor</p>
                     <h1>同步控制台</h1>
                     <p class="subtle">集中查看每日同步成功率、最近同步对象、站点明细和运行异常，整体布局按控制台风格重新整理。</p>
                 </div>
 
-                <div class="console-header-actions">
+                <div class="dashboard-header-tools">
                     <div class="header-chip">
                         <span>最近同步</span>
                         <strong>{{ summary.metrics.last_sync_at or "暂无记录" }}</strong>
                     </div>
-                    <div class="header-chip accent">
-                        <span>今日成功率</span>
-                        <strong>{{ summary.metrics.success_rate }}%</strong>
-                    </div>
-                    <form class="console-search" method="get" action="/dashboard">
-                        <span class="search-icon">⌕</span>
-                        <input type="text" name="sync_uuid" value="{{ filters.sync_uuid }}" placeholder="搜索 UUID">
-                        <input type="hidden" name="action" value="{{ filters.action }}">
-                        <input type="hidden" name="outcome" value="{{ filters.outcome }}">
-                        <input type="hidden" name="day" value="{{ filters.day }}">
-                        <button class="search-action" type="submit">搜索</button>
-                    </form>
                 </div>
             </header>
+
+            <form class="console-search console-search-wide" method="get" action="/dashboard">
+                <span class="search-icon">⌕</span>
+                <input type="text" name="sync_uuid" value="{{ filters.sync_uuid }}" placeholder="搜索 UUID，快速定位某个同步对象">
+                <input type="hidden" name="action" value="{{ filters.action }}">
+                <input type="hidden" name="outcome" value="{{ filters.outcome }}">
+                <input type="hidden" name="day" value="{{ filters.day }}">
+                <button class="search-action" type="submit">搜索</button>
+            </form>
 
             <section class="summary-grid">
                 <article class="hero-card surface-card">
@@ -350,15 +284,15 @@
 
                         <div class="monitor-log-sites">
                             {% if log.site_count %}
-                            <span class="site-summary-count">已记录 {{ log.site_count }} 个站点</span>
+                            <span class="site-summary-count">已识别 {{ log.site_count }} 个站点</span>
                             <p>
                                 {% for domain in log.site_preview %}
-                                    <code>{{ domain }}</code>{% if not loop.last %} / {% endif %}
+                                <code>{{ domain }}</code>{% if not loop.last %} / {% endif %}
                                 {% endfor %}
                                 {% if log.site_count > (log.site_preview | length) %} / ...{% endif %}
                             </p>
                             {% else %}
-                            <p>本次日志暂未生成站点列表。</p>
+                            <p>当前这条日志还没有可展示的站点信息。</p>
                             {% endif %}
                         </div>
 

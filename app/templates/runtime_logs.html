@@ -7,58 +7,64 @@
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-    <main class="page page-shell page-narrow">
-        <section class="topbar panel-surface">
-            <div class="topbar-copy">
-                <p class="eyebrow">运行日志</p>
-                <h1>最近 50 条应用错误与告警</h1>
-                <p class="subtle">这里保留完整的运行异常、上游 5xx、转发失败和诊断告警。日志文件路径 <code>{{ app_log_path }}</code></p>
-            </div>
-            <div class="topbar-tools">
-                <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
-                <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
-            </div>
-        </section>
+<body class="console-body">
+    <div class="console-shell">
+        {% include "partials/sidebar.html" %}
 
-        <section class="panel panel-surface">
-            {% if logs %}
-            <div class="log-list">
-                {% for log in logs %}
-                <article class="log-card">
-                    <div class="log-card-head">
-                        <div class="log-card-title">
-                            <strong>{{ log.occurred_at }}</strong>
-                            <p>{{ log.source }}</p>
-                        </div>
-                        <div class="log-card-badges">
-                            <span class="status {% if log.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ log.level }}</span>
-                        </div>
+        <main class="console-main">
+            <div class="page page-shell page-narrow">
+                <section class="topbar panel-surface">
+                    <div class="topbar-copy">
+                        <p class="eyebrow">运行日志</p>
+                        <h1>最近 50 条应用错误与告警</h1>
+                        <p class="subtle">这里保留完整的运行异常、上游 5xx、转发失败和诊断告警。日志文件路径 <code>{{ app_log_path }}</code></p>
                     </div>
-                    <div class="log-card-meta">
-                        <div class="meta-pair meta-pair-wide">
-                            <span class="meta-label">请求</span>
-                            <code class="meta-value">{{ log.request_method or '-' }} {{ log.request_path or '-' }}</code>
-                        </div>
-                        <div class="meta-pair">
-                            <span class="meta-label">UUID</span>
-                            <code class="meta-value">{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '-' }}</code>
-                        </div>
-                        <div class="meta-pair meta-pair-wide">
-                            <span class="meta-label">消息</span>
-                            <span class="meta-value">{{ log.message }}</span>
-                        </div>
+                    <div class="topbar-tools">
+                        <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
+                        <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
                     </div>
-                    <div class="log-card-actions">
-                        <a class="button" href="/runtime-logs/{{ log.id }}">查看详情</a>
+                </section>
+
+                <section class="panel panel-surface">
+                    {% if logs %}
+                    <div class="log-list">
+                        {% for log in logs %}
+                        <article class="log-card">
+                            <div class="log-card-head">
+                                <div class="log-card-title">
+                                    <strong>{{ log.occurred_at }}</strong>
+                                    <p>{{ log.source }}</p>
+                                </div>
+                                <div class="log-card-badges">
+                                    <span class="status {% if log.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ log.level }}</span>
+                                </div>
+                            </div>
+                            <div class="log-card-meta">
+                                <div class="meta-pair meta-pair-wide">
+                                    <span class="meta-label">请求</span>
+                                    <code class="meta-value">{{ log.request_method or '-' }} {{ log.request_path or '-' }}</code>
+                                </div>
+                                <div class="meta-pair">
+                                    <span class="meta-label">UUID</span>
+                                    <code class="meta-value">{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '-' }}</code>
+                                </div>
+                                <div class="meta-pair meta-pair-wide">
+                                    <span class="meta-label">消息</span>
+                                    <span class="meta-value">{{ log.message }}</span>
+                                </div>
+                            </div>
+                            <div class="log-card-actions">
+                                <a class="button" href="/runtime-logs/{{ log.id }}">查看详情</a>
+                            </div>
+                        </article>
+                        {% endfor %}
                     </div>
-                </article>
-                {% endfor %}
+                    {% else %}
+                    <p class="empty">当前没有运行异常日志。</p>
+                    {% endif %}
+                </section>
             </div>
-            {% else %}
-            <p class="empty">当前没有运行异常日志。</p>
-            {% endif %}
-        </section>
-    </main>
+        </main>
+    </div>
 </body>
 </html>

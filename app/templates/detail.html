@@ -7,117 +7,123 @@
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-    <main class="page page-shell page-narrow">
-        <section class="topbar panel-surface">
-            <div class="topbar-copy">
-                <p class="eyebrow">同步详情</p>
-                <h1>同步详情 #{{ log.id }}</h1>
-                <p class="subtle">这里展示单次同步请求的元数据、同步站点明细，以及上游响应摘录。</p>
-            </div>
-            <div class="topbar-tools">
-                <a class="button button-ghost" href="{{ sites_url }}">站点信息</a>
-                <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
-            </div>
-        </section>
+<body class="console-body">
+    <div class="console-shell">
+        {% include "partials/sidebar.html" %}
 
-        <section class="detail-hero panel-surface">
-            <div class="detail-highlight">
-                <span class="metric-label">结果</span>
-                <div class="detail-highlight-row">
-                    <strong>{{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}</strong>
-                    <span class="status {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">
-                        {{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}
-                    </span>
-                </div>
-                <small>记录时间 {{ log.occurred_at }}</small>
-            </div>
-            <div class="detail-highlight">
-                <span class="metric-label">UUID</span>
-                <strong><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别' }}</code></strong>
-                <small>客户端 {{ log.client_ip or '-' }}</small>
-            </div>
-            <div class="detail-highlight">
-                <span class="metric-label">耗时</span>
-                <strong>{{ log.duration_ms }} ms</strong>
-                <small>HTTP {{ log.http_status or '-' }}</small>
-            </div>
-        </section>
+        <main class="console-main">
+            <div class="page page-shell page-narrow">
+                <section class="topbar panel-surface">
+                    <div class="topbar-copy">
+                        <p class="eyebrow">同步详情</p>
+                        <h1>同步详情 #{{ log.id }}</h1>
+                        <p class="subtle">这里展示单次同步请求的元数据、同步站点明细，以及上游响应摘录。</p>
+                    </div>
+                    <div class="topbar-tools">
+                        <a class="button button-ghost" href="{{ sites_url }}">站点信息</a>
+                        <a class="button button-ghost" href="/dashboard">返回仪表盘</a>
+                    </div>
+                </section>
 
-        <section class="panel panel-surface">
-            <div class="panel-head">
-                <div>
-                    <p class="section-kicker">请求信息</p>
-                    <h2>请求元数据</h2>
-                </div>
-            </div>
-            <div class="table-shell">
-                <table class="detail-table">
-                    <tbody>
-                        <tr><th>记录时间</th><td>{{ log.occurred_at }}</td></tr>
-                        <tr><th>动作</th><td>{{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}</td></tr>
-                        <tr><th>UUID</th><td><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别' }}</code></td></tr>
-                        <tr><th>结果</th><td>{{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}</td></tr>
-                        <tr><th>HTTP 状态码</th><td>{{ log.http_status or '-' }}</td></tr>
-                        <tr><th>请求方法</th><td>{{ log.request_method }}</td></tr>
-                        <tr><th>请求路径</th><td><code>{{ log.request_path }}</code></td></tr>
-                        <tr><th>查询参数</th><td><code>{{ log.query_string or '-' }}</code></td></tr>
-                        <tr><th>客户端 IP</th><td>{{ log.client_ip or '-' }}</td></tr>
-                        <tr><th>浏览器标识</th><td>{{ log.user_agent or '-' }}</td></tr>
-                        <tr><th>请求体大小</th><td>{{ log.payload_size }} bytes</td></tr>
-                        <tr><th>请求摘要</th><td><code>{{ log.payload_hash or '-' }}</code></td></tr>
-                        <tr><th>响应大小</th><td>{{ log.response_size }} bytes</td></tr>
-                        <tr><th>错误信息</th><td>{{ log.error_message or '-' }}</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
+                <section class="detail-hero panel-surface">
+                    <div class="detail-highlight">
+                        <span class="metric-label">结果</span>
+                        <div class="detail-highlight-row">
+                            <strong>{{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}</strong>
+                            <span class="status {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">
+                                {{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}
+                            </span>
+                        </div>
+                        <small>记录时间 {{ log.occurred_at }}</small>
+                    </div>
+                    <div class="detail-highlight">
+                        <span class="metric-label">UUID</span>
+                        <strong><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别 UUID' }}</code></strong>
+                        <small>客户端 {{ log.client_ip or '-' }}</small>
+                    </div>
+                    <div class="detail-highlight">
+                        <span class="metric-label">耗时</span>
+                        <strong>{{ log.duration_ms }} ms</strong>
+                        <small>HTTP {{ log.http_status or '-' }}</small>
+                    </div>
+                </section>
 
-        <section class="panel panel-surface">
-            <div class="panel-head">
-                <div>
-                    <p class="section-kicker">同步站点</p>
-                    <h2>本次同步站点明细</h2>
-                </div>
-                <a class="ghost-action small" href="{{ sites_url }}">查看全部站点</a>
-            </div>
-            {% if sites %}
-            <div class="table-shell">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>站点名称</th>
-                            <th>站点域名</th>
-                            <th>同步时间</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for site in sites %}
-                        <tr>
-                            <td>{{ site.site_name }}</td>
-                            <td><code>{{ site.site_domain }}</code></td>
-                            <td>{{ site.synced_at }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <p class="empty">当前这次同步没有解析出可展示的站点明细。常见原因是 CookieCloud 只上传了加密后的 payload，代理在不读取 CK 明文的前提下无法还原站点列表。</p>
-            {% endif %}
-        </section>
+                <section class="panel panel-surface">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">请求信息</p>
+                            <h2>请求元数据</h2>
+                        </div>
+                    </div>
+                    <div class="table-shell">
+                        <table class="detail-table">
+                            <tbody>
+                                <tr><th>记录时间</th><td>{{ log.occurred_at }}</td></tr>
+                                <tr><th>动作</th><td>{{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}</td></tr>
+                                <tr><th>UUID</th><td><code>{{ log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别 UUID' }}</code></td></tr>
+                                <tr><th>结果</th><td>{{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}</td></tr>
+                                <tr><th>HTTP 状态码</th><td>{{ log.http_status or '-' }}</td></tr>
+                                <tr><th>请求方法</th><td>{{ log.request_method }}</td></tr>
+                                <tr><th>请求路径</th><td><code>{{ log.request_path }}</code></td></tr>
+                                <tr><th>查询参数</th><td><code>{{ log.query_string or '-' }}</code></td></tr>
+                                <tr><th>客户端 IP</th><td>{{ log.client_ip or '-' }}</td></tr>
+                                <tr><th>浏览器标识</th><td>{{ log.user_agent or '-' }}</td></tr>
+                                <tr><th>请求体大小</th><td>{{ log.payload_size }} bytes</td></tr>
+                                <tr><th>请求摘要</th><td><code>{{ log.payload_hash or '-' }}</code></td></tr>
+                                <tr><th>响应大小</th><td>{{ log.response_size }} bytes</td></tr>
+                                <tr><th>错误信息</th><td>{{ log.error_message or '-' }}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
 
-        <section class="panel panel-surface">
-            <div class="panel-head">
-                <div>
-                    <p class="section-kicker">响应内容</p>
-                    <h2>响应摘录</h2>
-                </div>
+                <section class="panel panel-surface">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">同步站点</p>
+                            <h2>本次同步站点明细</h2>
+                        </div>
+                        <a class="ghost-action small" href="{{ sites_url }}">查看全部站点</a>
+                    </div>
+                    {% if sites %}
+                    <div class="table-shell">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>站点名称</th>
+                                    <th>站点域名</th>
+                                    <th>同步时间</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for site in sites %}
+                                <tr>
+                                    <td>{{ site.site_name }}</td>
+                                    <td><code>{{ site.site_domain }}</code></td>
+                                    <td>{{ site.synced_at }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="empty">当前这次同步还没有解析出可展示的站点明细。</p>
+                    {% endif %}
+                </section>
+
+                <section class="panel panel-surface">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">响应内容</p>
+                            <h2>响应摘录</h2>
+                        </div>
+                    </div>
+                    <div class="excerpt-box">
+                        <pre>{{ log.response_excerpt or '-' }}</pre>
+                    </div>
+                </section>
             </div>
-            <div class="excerpt-box">
-                <pre>{{ log.response_excerpt or '-' }}</pre>
-            </div>
-        </section>
-    </main>
+        </main>
+    </div>
 </body>
 </html>

@@ -7,8 +7,11 @@
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-    <main class="page page-shell page-narrow">
+<body class="console-body">
+    <div class="console-shell">
+        {% include "partials/sidebar.html" %}
+        <main class="console-main">
+            <div class="page page-shell page-narrow">
         <section class="topbar panel-surface">
             <div class="topbar-copy">
                 <p class="eyebrow">系统设置</p>
@@ -200,6 +203,8 @@
                 </article>
             </div>
         </section>
-    </main>
+            </div>
+        </main>
+    </div>
 </body>
 </html>

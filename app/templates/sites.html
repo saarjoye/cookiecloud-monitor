@@ -7,117 +7,127 @@
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-    <main class="page page-shell page-narrow">
-        <section class="topbar panel-surface">
-            <div class="topbar-copy">
-                <p class="eyebrow">站点信息</p>
-                <h1>全部站点最近同步状态</h1>
-                <p class="subtle">这里汇总每个 UUID 下最近识别到的站点名称、站点域名、最近同步状态和最近同步时间。站点状态优先根据该 UUID 最近一次同步结果推断。</p>
-            </div>
-            <div class="topbar-tools">
-                <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
-                <a class="button button-ghost" href="{{ runtime_logs_url }}">运行日志</a>
-                <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
-            </div>
-        </section>
+<body class="console-body">
+    <div class="console-shell">
+        {% include "partials/sidebar.html" %}
 
-        <section class="cards">
-            <article class="metric-card panel-surface">
-                <span class="metric-label">站点总数</span>
-                <strong>{{ site_summary.total_sites }}</strong>
-            </article>
-            <article class="metric-card panel-surface">
-                <span class="metric-label">最近成功</span>
-                <strong>{{ site_summary.success_sites }}</strong>
-            </article>
-            <article class="metric-card panel-surface">
-                <span class="metric-label">最近失败</span>
-                <strong>{{ site_summary.failed_sites }}</strong>
-            </article>
-            <article class="metric-card panel-surface">
-                <span class="metric-label">关联 UUID</span>
-                <strong>{{ site_summary.tracked_uuids }}</strong>
-            </article>
-        </section>
+        <main class="console-main">
+            <div class="page page-shell page-narrow">
+                <section class="topbar panel-surface">
+                    <div class="topbar-copy">
+                        <p class="eyebrow">站点信息</p>
+                        <h1>全部站点最近同步状态</h1>
+                        <p class="subtle">这里汇总每个 UUID 下当前 CookieCloud 中的站点名称、站点域名、最近同步状态和最近同步时间。站点列表优先实时读取当前数据，不只依赖历史新增同步。</p>
+                    </div>
+                    <div class="topbar-tools">
+                        <a class="button button-ghost" href="{{ dashboard_url }}">返回仪表盘</a>
+                        <a class="button button-ghost" href="{{ runtime_logs_url }}">运行日志</a>
+                        <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
+                    </div>
+                </section>
 
-        <section class="panel panel-surface">
-            <div class="panel-head">
-                <div>
-                    <p class="section-kicker">筛选</p>
-                    <h2>站点筛选器</h2>
-                </div>
-            </div>
-            <form method="get" action="/sites" class="settings-grid">
-                <label class="field">
-                    <span>UUID</span>
-                    <input type="text" name="sync_uuid" value="{{ filters.sync_uuid }}" placeholder="按 UUID 过滤">
-                </label>
-                <label class="field">
-                    <span>关键词</span>
-                    <input type="text" name="keyword" value="{{ filters.keyword }}" placeholder="站点名称 / 域名 / UUID">
-                </label>
-                <label class="field">
-                    <span>最近状态</span>
-                    <select name="outcome">
-                        <option value="">全部</option>
-                        <option value="success" {% if filters.outcome == 'success' %}selected{% endif %}>成功</option>
-                        <option value="failed" {% if filters.outcome == 'failed' %}selected{% endif %}>失败</option>
-                    </select>
-                </label>
-                <div class="action-row">
-                    <button class="button" type="submit">应用筛选</button>
-                </div>
-            </form>
-        </section>
+                <section class="cards">
+                    <article class="metric-card panel-surface">
+                        <span class="metric-label">站点总数</span>
+                        <strong>{{ site_summary.total_sites }}</strong>
+                    </article>
+                    <article class="metric-card panel-surface">
+                        <span class="metric-label">最近成功</span>
+                        <strong>{{ site_summary.success_sites }}</strong>
+                    </article>
+                    <article class="metric-card panel-surface">
+                        <span class="metric-label">最近失败</span>
+                        <strong>{{ site_summary.failed_sites }}</strong>
+                    </article>
+                    <article class="metric-card panel-surface">
+                        <span class="metric-label">关联 UUID</span>
+                        <strong>{{ site_summary.tracked_uuids }}</strong>
+                    </article>
+                </section>
 
-        <section class="panel panel-surface">
-            <div class="panel-head">
-                <div>
-                    <p class="section-kicker">目录</p>
-                    <h2>站点同步目录</h2>
-                </div>
-            </div>
+                <section class="panel panel-surface">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">筛选</p>
+                            <h2>站点筛选器</h2>
+                        </div>
+                    </div>
+                    <form method="get" action="/sites" class="settings-grid">
+                        <label class="field">
+                            <span>UUID</span>
+                            <input type="text" name="sync_uuid" value="{{ filters.sync_uuid }}" placeholder="按 UUID 过滤">
+                        </label>
+                        <label class="field">
+                            <span>关键词</span>
+                            <input type="text" name="keyword" value="{{ filters.keyword }}" placeholder="站点名称 / 域名 / UUID">
+                        </label>
+                        <label class="field">
+                            <span>最近状态</span>
+                            <select name="outcome">
+                                <option value="">全部</option>
+                                <option value="success" {% if filters.outcome == 'success' %}selected{% endif %}>成功</option>
+                                <option value="failed" {% if filters.outcome == 'failed' %}selected{% endif %}>失败</option>
+                            </select>
+                        </label>
+                        <div class="action-row">
+                            <button class="button" type="submit">应用筛选</button>
+                        </div>
+                    </form>
+                </section>
 
-            {% if site_catalog %}
-            <div class="table-shell">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>UUID</th>
-                            <th>站点名称</th>
-                            <th>站点域名</th>
-                            <th>最近状态</th>
-                            <th>最近同步时间</th>
-                            <th>最近成功记录</th>
-                            <th>详情</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in site_catalog %}
-                        <tr>
-                            <td><code>{{ item.sync_uuid }}</code></td>
-                            <td>{{ item.site_name }}</td>
-                            <td><code>{{ item.site_domain }}</code></td>
-                            <td>
-                                <span class="status {% if item.latest_status == 'success' %}ok{% else %}bad{% endif %}">
-                                    {{ item.latest_status_label }}
-                                </span>
-                            </td>
-                            <td>{{ item.latest_sync_at }}</td>
-                            <td>{{ item.synced_at }}</td>
-                            <td>
-                                <a class="text-link" href="/logs/{{ item.detail_log_id }}">查看日志</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <section class="panel panel-surface">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">目录</p>
+                            <h2>站点同步目录</h2>
+                        </div>
+                    </div>
+
+                    {% if site_catalog %}
+                    <div class="table-shell">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>UUID</th>
+                                    <th>站点名称</th>
+                                    <th>站点域名</th>
+                                    <th>最近状态</th>
+                                    <th>最近同步时间</th>
+                                    <th>最近成功记录</th>
+                                    <th>详情</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in site_catalog %}
+                                <tr>
+                                    <td><code>{{ item.sync_uuid }}</code></td>
+                                    <td>{{ item.site_name }}</td>
+                                    <td><code>{{ item.site_domain }}</code></td>
+                                    <td>
+                                        <span class="status {% if item.latest_status == 'success' %}ok{% else %}bad{% endif %}">
+                                            {{ item.latest_status_label }}
+                                        </span>
+                                    </td>
+                                    <td>{{ item.latest_sync_at }}</td>
+                                    <td>{{ item.synced_at }}</td>
+                                    <td>
+                                        {% if item.detail_log_id %}
+                                        <a class="text-link" href="/logs/{{ item.detail_log_id }}">查看日志</a>
+                                        {% else %}
+                                        <span class="subtle">暂无</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="empty">当前还没有可展示的站点记录。请先确认 `COOKIECLOUD_SYNC_PASSWORD` 已正确配置，并重新触发一次同步。</p>
+                    {% endif %}
+                </section>
             </div>
-            {% else %}
-            <p class="empty">当前还没有可展示的站点记录。请先确认 `COOKIECLOUD_SYNC_PASSWORD` 已正确配置，并重新触发一次同步。</p>
-            {% endif %}
-        </section>
-    </main>
+        </main>
+    </div>
 </body>
 </html>
