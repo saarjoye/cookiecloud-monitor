@@ -402,6 +402,42 @@ def parse_form_map_from_raw_body(raw_body: bytes, content_type: str) -> dict[str
     return {}
 
 
+def summarize_json_payload_structure(raw_body: bytes, content_type: str) -> str:
+    if "application/json" not in content_type.lower() or not raw_body:
+        return "json_root=-"
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8", errors="replace"))
+    except Exception:
+        return "json_root=invalid"
+
+    if isinstance(payload, dict):
+        keys = ", ".join(sorted(str(key) for key in payload.keys())) or "-"
+        return f"json_root=dict; json_keys={keys}"
+
+    if isinstance(payload, list):
+        if payload and isinstance(payload[0], dict):
+            keys = ", ".join(sorted(str(key) for key in payload[0].keys())) or "-"
+            return f"json_root=list; first_item_keys={keys}; list_length={len(payload)}"
+        return f"json_root=list; list_length={len(payload)}"
+
+    return f"json_root={type(payload).__name__}"
+
+
+def summarize_transport_headers(source_headers: Any) -> str:
+    if source_headers is None:
+        return "content_encoding=-; transfer_encoding=-; content_length=-"
+
+    content_encoding = source_headers.get("content-encoding") or "-"
+    transfer_encoding = source_headers.get("transfer-encoding") or "-"
+    content_length = source_headers.get("content-length") or "-"
+    return (
+        f"content_encoding={content_encoding}; "
+        f"transfer_encoding={transfer_encoding}; "
+        f"content_length={content_length}"
+    )
+
+
 def build_request_debug_summary(
     *,
     content_type: str,
@@ -409,14 +445,18 @@ def build_request_debug_summary(
     payload_hash: str | None,
     form_map: dict[str, Any],
     sync_uuid: str | None,
+    raw_body: bytes | None = None,
+    source_headers: Any = None,
 ) -> str:
     keys = ", ".join(sorted(form_map.keys())) if form_map else "-"
     return (
         f"content_type={content_type or '-'}; "
+        f"{summarize_transport_headers(source_headers)}; "
         f"payload_size={payload_size}; "
         f"payload_hash={payload_hash or '-'}; "
         f"form_keys={keys}; "
-        f"detected_uuid={sync_uuid or '-'}"
+        f"detected_uuid={sync_uuid or '-'}; "
+        f"{summarize_json_payload_structure(raw_body or b'', content_type)}"
     )
 
 
@@ -931,7 +971,7 @@ async def forward_to_cookiecloud(
 
 
 def filtered_request_headers(source_headers: Any) -> dict[str, str]:
-    allowed = {"content-type"}
+    allowed = {"content-type", "content-encoding"}
     return {key: value for key, value in source_headers.items() if key.lower() in allowed}
 
 
@@ -1075,6 +1115,8 @@ async def proxy_update(request: Request) -> Response:
         payload_hash=payload_hash,
         form_map=form_map,
         sync_uuid=sync_uuid,
+        raw_body=raw_body,
+        source_headers=request.headers,
     )
 
     try:
@@ -1109,10 +1151,14 @@ async def proxy_update(request: Request) -> Response:
             response_excerpt=build_response_excerpt("upload", outcome, raw_body, json_body),
         )
         if outcome == "failed":
+            response_excerpt = build_response_excerpt("upload", outcome, raw_body, json_body)
             log_runtime_event(
                 level="error" if upstream_response.status_code >= 500 else "warning",
                 source="proxy_update",
-                message=f"Upstream /update returned {upstream_response.status_code}: {error_message or 'unknown error'}; {request_debug}",
+                message=(
+                    f"Upstream /update returned {upstream_response.status_code}: {error_message or 'unknown error'}; "
+                    f"response_excerpt={response_excerpt or '-'}; {request_debug}"
+                ),
                 request=request,
                 sync_uuid=sync_uuid,
             )
@@ -1187,6 +1233,8 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
         payload_hash=payload_hash,
         form_map=form_map,
         sync_uuid=sync_uuid,
+        raw_body=content,
+        source_headers=request.headers,
     )
 
     try:
@@ -1219,10 +1267,14 @@ async def proxy_get(sync_uuid: str, request: Request) -> Response:
             response_excerpt=build_response_excerpt("download", outcome, raw_body, json_body),
         )
         if outcome == "failed":
+            response_excerpt = build_response_excerpt("download", outcome, raw_body, json_body)
             log_runtime_event(
                 level="error" if upstream_response.status_code >= 500 else "warning",
                 source="proxy_get",
-                message=f"Upstream /get/{sync_uuid} returned {upstream_response.status_code}: {error_message or 'unknown error'}; {request_debug}",
+                message=(
+                    f"Upstream /get/{sync_uuid} returned {upstream_response.status_code}: {error_message or 'unknown error'}; "
+                    f"response_excerpt={response_excerpt or '-'}; {request_debug}"
+                ),
                 request=request,
                 sync_uuid=sync_uuid,
             )
