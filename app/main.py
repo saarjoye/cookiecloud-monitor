@@ -96,9 +96,9 @@ class Settings:
             wecom_secret=os.getenv("WECOM_SECRET", ""),
             wecom_api_base_url=(os.getenv("WECOM_API_BASE_URL", "https://qyapi.weixin.qq.com").strip() or "https://qyapi.weixin.qq.com").rstrip("/"),
             wecom_message_type=(
-                os.getenv("WECOM_MESSAGE_TYPE", "news").strip().lower()
-                if os.getenv("WECOM_MESSAGE_TYPE", "news").strip().lower() in {"text", "news"}
-                else "news"
+                os.getenv("WECOM_MESSAGE_TYPE", "text").strip().lower()
+                if os.getenv("WECOM_MESSAGE_TYPE", "text").strip().lower() in {"text", "news"}
+                else "text"
             ),
             wecom_to_user=os.getenv("WECOM_TO_USER", ""),
             wecom_to_party=os.getenv("WECOM_TO_PARTY", ""),
@@ -411,8 +411,8 @@ def build_wecom_api_url(path: str) -> str:
 
 
 def normalize_wecom_message_type(value: str | None = None) -> str:
-    normalized = (value or settings.wecom_message_type or "news").strip().lower()
-    return normalized if normalized in {"text", "news"} else "news"
+    normalized = (value or settings.wecom_message_type or "text").strip().lower()
+    return normalized if normalized in {"text", "news"} else "text"
 
 
 def build_monitor_page_url(request: Request, path: str) -> str:
@@ -2843,7 +2843,7 @@ async def update_settings(
     wecom_agent_id: str = Form(""),
     wecom_secret: str = Form(""),
     wecom_api_base_url: str = Form("https://qyapi.weixin.qq.com"),
-    wecom_message_type: str = Form("news"),
+    wecom_message_type: str = Form("text"),
     wecom_to_user: str = Form(""),
     wecom_to_party: str = Form(""),
     wecom_to_tag: str = Form(""),
@@ -2863,7 +2863,7 @@ async def update_settings(
         "wecom_agent_id": wecom_agent_id.strip(),
         "wecom_secret": wecom_secret.strip(),
         "wecom_api_base_url": (wecom_api_base_url.strip() or "https://qyapi.weixin.qq.com").rstrip("/"),
-        "wecom_message_type": normalize_wecom_message_type(wecom_message_type),
+        "wecom_message_type": normalize_wecom_message_type(wecom_message_type or "text"),
         "wecom_to_user": wecom_to_user.strip(),
         "wecom_to_party": wecom_to_party.strip(),
         "wecom_to_tag": wecom_to_tag.strip(),

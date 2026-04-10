@@ -101,14 +101,14 @@ http://YOUR_SERVER_IP:8090/settings
 | `WECOM_AGENT_ID` | WeCom agent ID | empty |
 | `WECOM_SECRET` | WeCom app secret | empty |
 | `WECOM_API_BASE_URL` | WeCom API base URL or reverse-proxy base URL | `https://qyapi.weixin.qq.com` |
-| `WECOM_MESSAGE_TYPE` | WeCom message type: `news` or `text` | `news` |
+| `WECOM_MESSAGE_TYPE` | WeCom message type: `text` or `news` | `text` |
 | `WECOM_TO_USER` | WeCom target user(s) | empty |
 | `WECOM_TO_PARTY` | WeCom target department(s) | empty |
 | `WECOM_TO_TAG` | WeCom target tag(s) | empty |
 
 ## WeCom Notifications
 
-When WeCom credentials are configured, the service can send `news` or `text` notifications for:
+When WeCom credentials are configured, the service can send `text` or `news` notifications for:
 
 - Successful dashboard logins
 - First-time sync for a UUID
@@ -117,7 +117,7 @@ When WeCom credentials are configured, the service can send `news` or `text` not
 - Payload updates when the payload hash changes
 
 If your environment cannot reach the official WeCom API directly, set `WECOM_API_BASE_URL` to your reverse-proxy base URL. The monitor will use that base URL for both `/cgi-bin/gettoken` and `/cgi-bin/message/send`.
-The default message type is `news`, which is usually friendlier in WeChat. If your app is restricted to plain text, switch `WECOM_MESSAGE_TYPE=text`.
+The default message type is `text`, which keeps the full change summary in the message body. Use `WECOM_MESSAGE_TYPE=news` only if you specifically want cover images and click-through cards.
 If WeCom news cards show a blank cover area, set `NOTIFICATION_PUBLIC_BASE_URL` to the public URL that WeCom/WeChat can reach. The monitor will use it to build the news article URL and the cover image URL.
 
 CK count tracking is best-effort. If CookieCloud sends only encrypted payloads, the proxy can still detect first syncs and payload updates, but may not be able to calculate exact CK counts.

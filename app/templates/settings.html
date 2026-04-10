@@ -25,7 +25,7 @@
                     </div>
                     <div class="tool-chip">
                         <span class="tool-chip-label">消息类型</span>
-                        <strong>{{ '图文 news' if settings_form.wecom_message_type == 'news' else '文本 text' }}</strong>
+                        <strong>{{ '文本 text' if settings_form.wecom_message_type == 'text' else '图文 news' }}</strong>
                     </div>
                     <div class="tool-chip">
                         <span class="tool-chip-label">当前账号</span>
@@ -148,10 +148,10 @@
                     <label class="field">
                         <span>通知消息类型</span>
                         <select name="wecom_message_type">
-                            <option value="news" {% if settings_form.wecom_message_type == 'news' %}selected{% endif %}>图文 news</option>
                             <option value="text" {% if settings_form.wecom_message_type == 'text' %}selected{% endif %}>文本 text</option>
+                            <option value="news" {% if settings_form.wecom_message_type == 'news' %}selected{% endif %}>图文 news</option>
                         </select>
-                        <small>默认推荐 `news`，更适合在微信里直接查看。若你的企业微信应用只允许文本消息，可切换为 `text`。</small>
+                        <small>默认推荐 `text`，通知内容会直接显示在消息正文里。`news` 仅作为可选方案，适合想保留封面图和跳转卡片时使用。</small>
                     </label>
                     <label class="field">
                         <span>接收成员</span>
@@ -166,7 +166,7 @@
                         <input type="text" name="wecom_to_tag" value="{{ settings_form.wecom_to_tag }}" placeholder="3|8">
                     </label>
                 </div>
-                <p class="helper-text">只有企业微信应用参数完整，并且至少配置了成员、部门或标签之一，通知才会真正发送。若网络环境无法直连企业微信官方接口，可把“企业微信 API 地址”改成你的反代地址。若微信里仍提示需到企业微信查看，请检查应用是否开启了“在微工作台中始终进入主页”。</p>
+                <p class="helper-text">只有企业微信应用参数完整，并且至少配置了成员、部门或标签之一，通知才会真正发送。若网络环境无法直连企业微信官方接口，可把“企业微信 API 地址”改成你的反代地址。若你主要在微信里阅读通知，建议直接使用 `text`。</p>
             </section>
 
             <div class="action-row">
