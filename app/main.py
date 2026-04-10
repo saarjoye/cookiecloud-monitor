@@ -462,10 +462,14 @@ def decode_request_body_for_inspection(raw_body: bytes, content_encoding: str) -
     return raw_body
 
 
-def derive_cookiecloud_passphrase(sync_uuid: str) -> str | None:
+def derive_cookiecloud_passphrases(sync_uuid: str) -> list[str]:
     if not sync_uuid or not settings.cookiecloud_sync_password:
-        return None
-    return hashlib.md5(f"{sync_uuid}-{settings.cookiecloud_sync_password}".encode("utf-8")).hexdigest()
+        return []
+
+    digest = hashlib.md5(f"{sync_uuid}-{settings.cookiecloud_sync_password}".encode("utf-8")).hexdigest()
+    candidates = [digest[:16], digest]
+    seen: set[str] = set()
+    return [item for item in candidates if item and not (item in seen or seen.add(item))]
 
 
 def evp_bytes_to_key(passphrase: bytes, salt: bytes, *, key_length: int = 32, iv_length: int = 16) -> tuple[bytes, bytes]:
@@ -478,8 +482,8 @@ def evp_bytes_to_key(passphrase: bytes, salt: bytes, *, key_length: int = 32, iv
 
 
 def decrypt_cookiecloud_payload(sync_uuid: str, encrypted_payload: str) -> Any | None:
-    passphrase = derive_cookiecloud_passphrase(sync_uuid)
-    if not passphrase or not encrypted_payload:
+    passphrases = derive_cookiecloud_passphrases(sync_uuid)
+    if not passphrases or not encrypted_payload:
         return None
 
     try:
@@ -488,13 +492,20 @@ def decrypt_cookiecloud_payload(sync_uuid: str, encrypted_payload: str) -> Any |
             return None
         salt = raw[8:16]
         ciphertext = raw[16:]
-        key, iv = evp_bytes_to_key(passphrase.encode("utf-8"), salt)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
-        return json.loads(plaintext.decode("utf-8"))
     except Exception:
-        LOGGER.warning("Unable to decrypt CookieCloud payload for sync_uuid=%s", sync_uuid)
         return None
+
+    for passphrase in passphrases:
+        try:
+            key, iv = evp_bytes_to_key(passphrase.encode("utf-8"), salt)
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+            plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
+            return json.loads(plaintext.decode("utf-8"))
+        except Exception:
+            continue
+
+    LOGGER.warning("Unable to decrypt CookieCloud payload for sync_uuid=%s", sync_uuid)
+    return None
 
 
 def maybe_json_bytes(raw: bytes) -> Any | None:
@@ -2057,7 +2068,8 @@ def fetch_latest_recorded_sites_by_uuid(sync_uuids: list[str]) -> dict[str, list
 
 async def fetch_live_sites_for_uuid(sync_uuid: str) -> list[dict[str, str]]:
     try:
-        upstream_response = await forward_to_cookiecloud(method="GET", path=f"/get/{sync_uuid}")
+        params = {"password": settings.cookiecloud_sync_password} if settings.cookiecloud_sync_password else None
+        upstream_response = await forward_to_cookiecloud(method="GET", path=f"/get/{sync_uuid}", params=params)
     except Exception:
         return []
 
