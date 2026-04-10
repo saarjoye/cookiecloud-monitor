@@ -265,6 +265,17 @@ def get_db_connection() -> sqlite3.Connection:
     return connection
 
 
+def ensure_table_columns(connection: sqlite3.Connection, table_name: str, required_columns: dict[str, str]) -> None:
+    existing_columns = {
+        str(row["name"])
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    for column_name, column_sql in required_columns.items():
+        if column_name in existing_columns:
+            continue
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+
+
 def init_db() -> None:
     with get_db_connection() as connection:
         connection.execute(CREATE_LOGS_SQL)
@@ -278,6 +289,13 @@ def init_db() -> None:
         connection.execute(CREATE_SYNC_SITES_SQL)
         connection.execute(CREATE_SYNC_SITES_LOG_INDEX_SQL)
         connection.execute(CREATE_SYNC_SITES_SYNCED_AT_INDEX_SQL)
+        ensure_table_columns(
+            connection,
+            "sync_sites",
+            {
+                "site_signature": "site_signature TEXT",
+            },
+        )
         connection.commit()
 
 
@@ -428,7 +446,38 @@ def build_wecom_news_payload(title: str, body_lines: list[str], request: Request
     }
 
 
-def build_wecom_message_payload(title: str, body_lines: list[str], request: Request, target_path: str) -> dict[str, Any]:
+def build_wecom_news_articles(
+    title: str,
+    body_lines: list[str],
+    request: Request,
+    target_path: str,
+    extra_articles: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
+    base_article = build_wecom_news_payload(title, body_lines, request, target_path)["articles"][0]
+    articles = [base_article]
+    if extra_articles:
+        for item in extra_articles:
+            description = str(item.get("description") or "").strip()
+            if len(description) > 220:
+                description = f"{description[:217]}..."
+            articles.append(
+                {
+                    "title": str(item.get("title") or title)[:64],
+                    "description": description or "点击查看 CookieCloud Monitor 详情",
+                    "url": str(item.get("url") or build_monitor_page_url(request, target_path)),
+                    "picurl": str(item.get("picurl") or build_monitor_page_url(request, "/static/wecom-card.svg")),
+                }
+            )
+    return articles[:8]
+
+
+def build_wecom_message_payload(
+    title: str,
+    body_lines: list[str],
+    request: Request,
+    target_path: str,
+    extra_articles: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     receiver_payload = {
         "touser": settings.wecom_to_user or None,
         "toparty": settings.wecom_to_party or None,
@@ -446,8 +495,75 @@ def build_wecom_message_payload(title: str, body_lines: list[str], request: Requ
         return message_payload
 
     message_payload["msgtype"] = "news"
-    message_payload["news"] = build_wecom_news_payload(title, body_lines, request, target_path)
+    message_payload["news"] = {
+        "articles": build_wecom_news_articles(title, body_lines, request, target_path, extra_articles=extra_articles)
+    }
     return message_payload
+
+
+def derive_sync_change_title(state: dict[str, Any]) -> str:
+    site_changes = state.get("site_changes") or {}
+    change_types = list(site_changes.get("change_types") or [])
+    if state.get("is_first_sync"):
+        return "CookieCloud 首次同步"
+    if change_types == ["上传"]:
+        return "CookieCloud 站点上传"
+    if change_types == ["更新"]:
+        return "CookieCloud 站点更新"
+    if change_types == ["删除"]:
+        return "CookieCloud 站点删除"
+    if change_types:
+        return "CookieCloud 站点变更"
+    if state.get("cookie_delta") is not None and state["cookie_delta"] > 0:
+        return "CookieCloud CK 数量增加"
+    if state.get("cookie_delta") is not None and state["cookie_delta"] < 0:
+        return "CookieCloud CK 数量减少"
+    if state.get("payload_changed"):
+        return "CookieCloud 同步内容更新"
+    return "CookieCloud 同步提醒"
+
+
+def build_sync_notification_lines(sync_uuid: str, state: dict[str, Any], request: Request) -> list[str]:
+    site_changes = state.get("site_changes") or {}
+    body_lines = [
+        f"> 客户端类型：`{state.get('client_type') or '未知客户端'}`",
+        f"> UUID：`{sync_uuid}`",
+        f"> 时间：`{now_local().isoformat(timespec='seconds')}`",
+        f"> 来源 IP：`{client_ip_from_request(request) or '-'}`",
+        f"> 变更类型：`{site_changes.get('change_type_label') or '无站点变化'}`",
+        f"> 站点变更汇总：`{site_changes.get('summary_line') or '上传 0 / 更新 0 / 删除 0'}`",
+        f"> 当前 CK 数：`{state['cookie_count'] if state['cookie_count'] is not None else '-'}`",
+        f"> 站点数：`{state['site_count'] if state['site_count'] is not None else '-'}`",
+    ]
+    if state.get("previous_cookie_count") is not None:
+        body_lines.append(f"> 变更前 CK 数：`{state['previous_cookie_count']}`")
+    if state.get("cookie_delta") is not None:
+        sign = "+" if state["cookie_delta"] > 0 else ""
+        body_lines.append(f"> 变化值：`{sign}{state['cookie_delta']}`")
+
+    for label, key in (("上传站点", "uploaded_sites"), ("更新站点", "updated_sites"), ("删除站点", "deleted_sites")):
+        site_names = list(site_changes.get(key) or [])
+        if not site_names:
+            continue
+        body_lines.append(f"> {label}：`{format_site_name_list(site_names, limit=8)}`")
+    return body_lines
+
+
+def build_sync_news_articles(state: dict[str, Any], request: Request, target_path: str) -> list[dict[str, str]]:
+    site_changes = state.get("site_changes") or {}
+    extra_articles: list[dict[str, str]] = []
+    for title, key in (("上传站点", "uploaded_sites"), ("更新站点", "updated_sites"), ("删除站点", "deleted_sites")):
+        site_names = list(site_changes.get(key) or [])
+        if not site_names:
+            continue
+        extra_articles.append(
+            {
+                "title": f"{title} · {len(site_names)}",
+                "description": format_site_name_list(site_names, limit=8),
+                "url": build_monitor_page_url(request, target_path),
+            }
+        )
+    return extra_articles
 
 
 def notification_target_summary() -> str:
@@ -718,7 +834,38 @@ def derive_site_name(entry: dict[str, Any], site_domain: str) -> str:
     return site_domain or "未知站点"
 
 
-def extract_sync_sites(
+def normalize_site_entry_for_signature(entry: dict[str, Any], site_domain: str) -> dict[str, Any]:
+    normalized: dict[str, Any] = {
+        "site_domain": site_domain,
+        "name": normalize_form_value(entry.get("name")).strip(),
+        "domain": normalize_site_domain(entry.get("domain") or site_domain),
+        "path": normalize_form_value(entry.get("path")).strip() or "/",
+        "value": normalize_form_value(entry.get("value")),
+        "expirationDate": normalize_form_value(entry.get("expirationDate") or entry.get("expires") or entry.get("expiration")),
+        "secure": bool(entry.get("secure")),
+        "httpOnly": bool(entry.get("httpOnly") or entry.get("httponly")),
+        "sameSite": normalize_form_value(entry.get("sameSite") or entry.get("same_site")).strip().lower(),
+    }
+    if not normalized["name"]:
+        normalized["name"] = normalize_form_value(entry.get("key")).strip()
+    return normalized
+
+
+def build_site_signature(entries: list[dict[str, Any]]) -> str:
+    ordered_entries = sorted(
+        entries,
+        key=lambda item: (
+            normalize_form_value(item.get("name")),
+            normalize_form_value(item.get("domain")),
+            normalize_form_value(item.get("path")),
+            normalize_form_value(item.get("value")),
+        ),
+    )
+    payload = json.dumps(ordered_entries, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def extract_sync_site_snapshots(
     form_data: dict[str, Any],
     raw_body: bytes,
     content_type: str,
@@ -728,27 +875,46 @@ def extract_sync_sites(
     if payload is None:
         return []
 
-    seen: set[tuple[str, str]] = set()
-    sites: list[dict[str, str]] = []
+    grouped: dict[str, dict[str, Any]] = {}
     for entry, domain_hint in collect_cookie_like_entries(payload):
         site_domain = normalize_site_domain(
             entry.get("domain") or entry.get("host") or entry.get("site") or entry.get("url") or domain_hint
         )
         if not site_domain:
             continue
-        site_name = derive_site_name(entry, site_domain)
-        dedupe_key = (site_name.lower(), site_domain)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        sites.append(
+        site_name = derive_site_name(entry, site_domain)[:120]
+        bucket = grouped.setdefault(
+            site_domain,
             {
-                "site_name": site_name[:120],
+                "site_name": site_name,
                 "site_domain": site_domain[:255],
+                "entries": [],
+            },
+        )
+        if bucket["site_name"] == bucket["site_domain"] and site_name != bucket["site_domain"]:
+            bucket["site_name"] = site_name
+        bucket["entries"].append(normalize_site_entry_for_signature(entry, site_domain))
+
+    snapshots: list[dict[str, str]] = []
+    for bucket in grouped.values():
+        snapshots.append(
+            {
+                "site_name": str(bucket["site_name"])[:120],
+                "site_domain": str(bucket["site_domain"])[:255],
+                "site_signature": build_site_signature(list(bucket["entries"])),
             }
         )
+    return sorted(snapshots, key=lambda item: (item["site_domain"], item["site_name"]))
 
-    return sorted(sites, key=lambda item: (item["site_domain"], item["site_name"]))
+
+def extract_sync_sites(
+    form_data: dict[str, Any],
+    raw_body: bytes,
+    content_type: str,
+    sync_uuid: str | None = None,
+) -> list[dict[str, str]]:
+    snapshots = extract_sync_site_snapshots(form_data, raw_body, content_type, sync_uuid)
+    return [{"site_name": item["site_name"], "site_domain": item["site_domain"]} for item in snapshots]
 
 
 def parse_form_map_from_raw_body(raw_body: bytes, content_type: str) -> dict[str, Any]:
@@ -905,6 +1071,41 @@ def client_ip_from_request(request: Request) -> str | None:
     if request.client:
         return request.client.host
     return None
+
+
+def detect_client_type(
+    request: Request,
+    form_data: dict[str, Any],
+    raw_body: bytes,
+    content_type: str,
+) -> str:
+    candidate_texts: list[str] = []
+    raw_payload = maybe_json_bytes(raw_body) if "application/json" in content_type.lower() else None
+
+    for key in ("client_type", "clientType", "source", "platform", "from", "app", "appType"):
+        if form_data.get(key):
+            candidate_texts.append(normalize_form_value(form_data[key]).lower())
+        if isinstance(raw_payload, dict):
+            payload_value = extract_candidate_from_payload(raw_payload, key)
+            if payload_value:
+                candidate_texts.append(payload_value.lower())
+
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    candidate_texts.append(user_agent)
+
+    if any(
+        token in text
+        for text in candidate_texts
+        for token in ("miniprogram", "mini program", "mini_program", "micromessenger", "wxwork")
+    ):
+        return "MP"
+    if any(
+        token in text
+        for text in candidate_texts
+        for token in ("extension", "chrome", "edg", "firefox", "mozilla", "safari")
+    ):
+        return "浏览器插件"
+    return "未知客户端"
 
 
 def filtered_response_headers(source_headers: httpx.Headers) -> dict[str, str]:
@@ -1120,11 +1321,24 @@ async def get_wecom_access_token() -> str:
     return token
 
 
-async def send_wecom_notification(title: str, body_lines: list[str], request: Request, target_path: str = "/dashboard") -> None:
+async def send_wecom_notification(
+    title: str,
+    body_lines: list[str],
+    request: Request,
+    target_path: str = "/dashboard",
+    *,
+    extra_articles: list[dict[str, str]] | None = None,
+) -> None:
     if not settings.wecom_enabled:
         return
 
-    message_payload = build_wecom_message_payload(title, body_lines, request, target_path)
+    message_payload = build_wecom_message_payload(
+        title,
+        body_lines,
+        request,
+        target_path,
+        extra_articles=extra_articles,
+    )
     if not message_payload:
         return
 
@@ -1159,36 +1373,31 @@ async def send_login_notification(request: Request, username: str) -> None:
     )
 
 
-async def send_sync_notification(sync_uuid: str, state: dict[str, Any], request: Request) -> None:
+async def send_sync_notification(sync_uuid: str, state: dict[str, Any], request: Request, sync_log_id: int | None = None) -> None:
     if not settings.wecom_enabled:
         return
 
-    title = ""
-    if state["is_first_sync"]:
-        title = "CookieCloud 首次同步提醒"
-    elif state["cookie_delta"] is not None and state["cookie_delta"] > 0:
-        title = "CookieCloud CK 数量增加"
-    elif state["cookie_delta"] is not None and state["cookie_delta"] < 0:
-        title = "CookieCloud CK 数量减少"
-    elif state["payload_changed"]:
-        title = "CookieCloud 同步内容更新"
-    else:
+    site_changes = state.get("site_changes") or {}
+    if not (
+        state.get("is_first_sync")
+        or state.get("payload_changed")
+        or state.get("cookie_delta") is not None
+        or site_changes.get("uploaded_count")
+        or site_changes.get("updated_count")
+        or site_changes.get("deleted_count")
+    ):
         return
 
-    body_lines = [
-        f"> UUID：`{sync_uuid}`",
-        f"> 时间：`{now_local().isoformat(timespec='seconds')}`",
-        f"> 来源 IP：`{client_ip_from_request(request) or '-'}`",
-        f"> 当前 CK 数：`{state['cookie_count'] if state['cookie_count'] is not None else '-'}`",
-        f"> 站点数：`{state['site_count'] if state['site_count'] is not None else '-'}`",
-    ]
-    if state["previous_cookie_count"] is not None:
-        body_lines.append(f"> 变更前 CK 数：`{state['previous_cookie_count']}`")
-    if state["cookie_delta"] is not None:
-        sign = "+" if state["cookie_delta"] > 0 else ""
-        body_lines.append(f"> 变化值：`{sign}{state['cookie_delta']}`")
-
-    await send_wecom_notification(title, body_lines, request, f"/dashboard?sync_uuid={quote(sync_uuid)}")
+    title = derive_sync_change_title(state)
+    body_lines = build_sync_notification_lines(sync_uuid, state, request)
+    target_path = f"/logs/{sync_log_id}" if sync_log_id else f"/dashboard?sync_uuid={quote(sync_uuid)}"
+    await send_wecom_notification(
+        title,
+        body_lines,
+        request,
+        target_path,
+        extra_articles=build_sync_news_articles(state, request, target_path),
+    )
 
 
 async def send_test_notification(request: Request) -> None:
@@ -1306,8 +1515,8 @@ def record_sync_sites(
     with get_db_connection() as connection:
         connection.executemany(
             """
-            INSERT INTO sync_sites (sync_log_id, sync_uuid, synced_at, site_name, site_domain)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sync_sites (sync_log_id, sync_uuid, synced_at, site_name, site_domain, site_signature)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -1316,11 +1525,111 @@ def record_sync_sites(
                     synced_at,
                     item["site_name"],
                     item["site_domain"],
+                    item.get("site_signature"),
                 )
                 for item in sites
             ],
         )
         connection.commit()
+
+
+def fetch_latest_site_snapshot_map(sync_uuid: str | None) -> dict[str, dict[str, Any]]:
+    normalized_sync_uuid = (sync_uuid or "").strip()
+    if not normalized_sync_uuid:
+        return {}
+
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            """
+            WITH latest_site AS (
+                SELECT
+                    site_name,
+                    site_domain,
+                    site_signature,
+                    synced_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(sync_uuid, 'unknown'), site_domain
+                        ORDER BY synced_at DESC, id DESC
+                    ) AS rn
+                FROM sync_sites
+                WHERE COALESCE(sync_uuid, 'unknown') = ?
+            )
+            SELECT site_name, site_domain, site_signature, synced_at
+            FROM latest_site
+            WHERE rn = 1
+            """,
+            (normalized_sync_uuid,),
+        ).fetchall()
+    return {str(row["site_domain"]): dict(row) for row in rows}
+
+
+def render_site_label(site: dict[str, Any]) -> str:
+    site_name = str(site.get("site_name") or "").strip()
+    site_domain = str(site.get("site_domain") or "").strip()
+    if site_name and site_domain and site_name != site_domain:
+        return f"{site_name} ({site_domain})"
+    return site_name or site_domain or "未知站点"
+
+
+def format_site_name_list(site_names: list[str], *, limit: int = 8) -> str:
+    if not site_names:
+        return "-"
+    if len(site_names) <= limit:
+        return "、".join(site_names)
+    return f"{'、'.join(site_names[:limit])} 等 {len(site_names)} 个站点"
+
+
+def summarize_site_changes(sync_uuid: str | None, current_sites: list[dict[str, str]]) -> dict[str, Any]:
+    previous_map = fetch_latest_site_snapshot_map(sync_uuid)
+    current_map = {str(item["site_domain"]): item for item in current_sites if item.get("site_domain")}
+
+    uploaded_sites = [current_map[key] for key in current_map.keys() - previous_map.keys()]
+    deleted_sites = [previous_map[key] for key in previous_map.keys() - current_map.keys()]
+    updated_sites: list[dict[str, Any]] = []
+    unchanged_count = 0
+
+    for site_domain in current_map.keys() & previous_map.keys():
+        current_item = current_map[site_domain]
+        previous_item = previous_map[site_domain]
+        previous_signature = str(previous_item.get("site_signature") or "").strip()
+        current_signature = str(current_item.get("site_signature") or "").strip()
+        previous_name = str(previous_item.get("site_name") or "").strip()
+        current_name = str(current_item.get("site_name") or "").strip()
+        if previous_signature and current_signature:
+            if previous_signature != current_signature or previous_name != current_name:
+                updated_sites.append(current_item)
+            else:
+                unchanged_count += 1
+            continue
+        if previous_name != current_name:
+            updated_sites.append(current_item)
+        else:
+            unchanged_count += 1
+
+    uploaded_labels = [render_site_label(item) for item in sorted(uploaded_sites, key=render_site_label)]
+    updated_labels = [render_site_label(item) for item in sorted(updated_sites, key=render_site_label)]
+    deleted_labels = [render_site_label(item) for item in sorted(deleted_sites, key=render_site_label)]
+
+    change_types = [
+        label
+        for label, count in (("上传", len(uploaded_labels)), ("更新", len(updated_labels)), ("删除", len(deleted_labels)))
+        if count
+    ]
+
+    return {
+        "uploaded_sites": uploaded_labels,
+        "updated_sites": updated_labels,
+        "deleted_sites": deleted_labels,
+        "uploaded_count": len(uploaded_labels),
+        "updated_count": len(updated_labels),
+        "deleted_count": len(deleted_labels),
+        "unchanged_count": unchanged_count,
+        "change_types": change_types,
+        "change_type_label": " / ".join(change_types) if change_types else "无站点变化",
+        "summary_line": (
+            f"上传 {len(uploaded_labels)} / 更新 {len(updated_labels)} / 删除 {len(deleted_labels)}"
+        ),
+    }
 
 
 def log_runtime_event(
@@ -1527,7 +1836,8 @@ async def proxy_update(request: Request) -> Response:
         payload_size = len(raw_body)
         payload_hash = hashlib.sha256(raw_body).hexdigest()
     cookie_count, site_count = extract_sync_counts(form_map, inspection_body, content_type, sync_uuid)
-    sync_sites = extract_sync_sites(form_map, inspection_body, content_type, sync_uuid)
+    sync_sites = extract_sync_site_snapshots(form_map, inspection_body, content_type, sync_uuid)
+    client_type = detect_client_type(request, form_map, inspection_body, content_type)
     start_time = time.perf_counter()
     request_debug = build_request_debug_summary(
         content_type=content_type,
@@ -1553,6 +1863,8 @@ async def proxy_update(request: Request) -> Response:
         sync_state: dict[str, Any] | None = None
         if outcome == "success":
             sync_state = update_sync_state(sync_uuid, payload_hash, cookie_count, site_count)
+            sync_state["client_type"] = client_type
+            sync_state["site_changes"] = summarize_site_changes(sync_uuid, sync_sites)
         sync_log = record_sync_log(
             action="upload",
             sync_uuid=sync_uuid,
@@ -1598,7 +1910,7 @@ async def proxy_update(request: Request) -> Response:
             )
         if outcome == "success" and sync_uuid and sync_state is not None:
             try:
-                await send_sync_notification(sync_uuid, sync_state, request)
+                await send_sync_notification(sync_uuid, sync_state, request, sync_log["id"])
             except Exception:
                 pass
         return Response(
