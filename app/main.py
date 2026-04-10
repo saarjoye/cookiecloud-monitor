@@ -444,7 +444,7 @@ def build_wecom_news_payload(title: str, body_lines: list[str], request: Request
                 "title": title[:64],
                 "description": description or "点击查看 CookieCloud Monitor 详情",
                 "url": build_monitor_page_url(request, target_path),
-                "picurl": build_monitor_page_url(request, "/static/wecom-card.svg"),
+                "picurl": build_monitor_page_url(request, "/static/wecom-card.png"),
             }
         ]
     }
