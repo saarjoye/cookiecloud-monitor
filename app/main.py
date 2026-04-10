@@ -380,6 +380,38 @@ def extract_candidate(form_data: dict[str, Any], *keys: str) -> str | None:
     return None
 
 
+def extract_candidate_from_payload(payload: Any, *keys: str) -> str | None:
+    if isinstance(payload, dict):
+        for key in keys:
+            value = payload.get(key)
+            if value:
+                return normalize_form_value(value)
+        for value in payload.values():
+            nested = extract_candidate_from_payload(value, *keys)
+            if nested:
+                return nested
+        return None
+
+    if isinstance(payload, list):
+        for item in payload:
+            nested = extract_candidate_from_payload(item, *keys)
+            if nested:
+                return nested
+
+    return None
+
+
+def extract_candidate_from_raw_body(raw_body: bytes, content_type: str, *keys: str) -> str | None:
+    if "application/json" not in content_type.lower() or not raw_body:
+        return None
+
+    payload = maybe_json_bytes(raw_body)
+    if payload is None:
+        return None
+
+    return extract_candidate_from_payload(payload, *keys)
+
+
 def parse_form_map_from_raw_body(raw_body: bytes, content_type: str) -> dict[str, Any]:
     if not raw_body:
         return {}
@@ -1103,6 +1135,8 @@ async def proxy_update(request: Request) -> Response:
     except Exception:
         form_map = parse_form_map_from_raw_body(raw_body, content_type)
     sync_uuid = extract_candidate(form_map, "uuid", "userUUID", "user_uuid", "id")
+    if not sync_uuid:
+        sync_uuid = extract_candidate_from_raw_body(raw_body, content_type, "uuid", "userUUID", "user_uuid", "id")
     payload_size, payload_hash = build_payload_digest(form_map)
     if payload_size == 0 and raw_body:
         payload_size = len(raw_body)
