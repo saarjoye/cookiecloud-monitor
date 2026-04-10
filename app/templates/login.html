@@ -8,8 +8,8 @@
     <link rel="stylesheet" href="/static/login-app/login.css">
     <style>
         :root {
-            color: #172033;
-            background: #f5f1e9;
+            color: #f5f7fb;
+            background: #0b0d14;
             font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
         }
 
@@ -17,8 +17,9 @@
             margin: 0;
             min-height: 100vh;
             background:
-                radial-gradient(circle at top, rgba(15, 118, 110, 0.14), transparent 28%),
-                linear-gradient(180deg, #fbfaf7 0%, #f4efe7 100%);
+                radial-gradient(circle at 20% 20%, rgba(255, 164, 67, 0.16), transparent 18%),
+                radial-gradient(circle at 80% 15%, rgba(127, 86, 247, 0.14), transparent 22%),
+                linear-gradient(180deg, #090b11 0%, #0d1119 100%);
         }
 
         #login-root {
@@ -43,22 +44,26 @@
 
         .fallback-card {
             width: min(100%, 420px);
-            padding: 28px;
+            padding: 28px 24px;
             border-radius: 28px;
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(23, 32, 51, 0.08);
-            box-shadow: 0 20px 60px rgba(18, 24, 38, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.08));
+            box-shadow: 0 28px 70px rgba(0, 0, 0, 0.34);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
         }
 
         .fallback-card h1 {
             margin: 0 0 10px;
-            font-size: 28px;
+            font-size: 34px;
+            line-height: 1.02;
+            letter-spacing: -0.04em;
         }
 
         .fallback-card p {
             margin: 0 0 20px;
-            color: #62708b;
-            line-height: 1.6;
+            color: rgba(245, 247, 252, 0.7);
+            line-height: 1.8;
         }
 
         .fallback-card form {
@@ -67,19 +72,20 @@
         }
 
         .fallback-card input {
-            height: 46px;
+            height: 52px;
             border-radius: 14px;
-            border: 1px solid rgba(23, 32, 51, 0.12);
-            background: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.08);
             padding: 0 14px;
+            color: #fff;
             font: inherit;
         }
 
         .fallback-card button {
-            height: 48px;
+            height: 52px;
             border: 0;
-            border-radius: 999px;
-            background: linear-gradient(180deg, #1c263a 0%, #101722 100%);
+            border-radius: 14px;
+            background: linear-gradient(90deg, #9a74ff 0%, #7f56f7 100%);
             color: #fff;
             font: inherit;
             font-weight: 700;
@@ -89,9 +95,9 @@
         .fallback-error {
             padding: 12px 14px;
             border-radius: 14px;
-            background: #fff1f0;
-            border: 1px solid #fecaca;
-            color: #b42318;
+            border: 1px solid rgba(240, 68, 97, 0.24);
+            background: rgba(240, 68, 97, 0.1);
+            color: #ff9cac;
             font-size: 14px;
         }
     </style>
@@ -106,8 +112,8 @@
             {% endif %}
             <form method="post" action="/auth/login-form">
                 <input type="hidden" name="next" value="{{ next_path }}">
-                <input type="text" name="username" placeholder="登录账号" value="{{ fallback_username or '' }}" autocomplete="username" required>
-                <input type="password" name="password" placeholder="登录密码" autocomplete="current-password" required>
+                <input type="text" name="username" placeholder="用户名" value="{{ fallback_username or '' }}" autocomplete="username" required>
+                <input type="password" name="password" placeholder="密码" autocomplete="current-password" required>
                 <button type="submit">进入控制台</button>
             </form>
         </section>

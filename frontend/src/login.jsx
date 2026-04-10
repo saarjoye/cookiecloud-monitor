@@ -6,74 +6,61 @@ import "./styles.css";
 const VIDEO_URL =
   "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260302_085640_276ea93b-d7da-4418-a09b-2aa5b490e838.mp4";
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 34 },
+const fadeUp = {
+  hidden: { opacity: 0, y: 28 },
   show: (delay = 0) => ({
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.8,
+      duration: 0.72,
       ease: [0.22, 1, 0.36, 1],
       delay
     }
   })
 };
 
-function ReviewBadge() {
+function LoginFeature({ title, detail }) {
   return (
-    <div className="inline-flex w-fit items-center gap-4 rounded-full border border-white/60 bg-white/75 px-4 py-3 shadow-[0px_18px_60px_-28px_rgba(15,23,42,0.35)] backdrop-blur-md">
-      <div className="flex -space-x-2">
-        {["A", "B", "C"].map((letter, index) => (
-          <span
-            key={letter}
-            className={`flex size-9 items-center justify-center rounded-full border border-white/70 text-xs font-medium text-white ${
-              index === 0 ? "bg-slate-900" : index === 1 ? "bg-slate-700" : "bg-slate-500"
-            }`}
-          >
-            {letter}
-          </span>
-        ))}
-      </div>
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1 text-amber-400">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <svg key={index} viewBox="0 0 20 20" className="size-4 fill-current">
-              <path d="M10 1.5l2.5 5.06 5.58.81-4.04 3.94.95 5.56L10 14.24 5.01 16.87l.95-5.56-4.04-3.94 5.58-.81L10 1.5z" />
-            </svg>
-          ))}
-        </div>
-        <div className="text-sm text-slate-700">
-          <span className="font-semibold text-slate-900">1,020+ Reviews</span>
-          <span className="ml-2 opacity-80">来自真实运维团队</span>
-        </div>
+    <div className="login-feature">
+      <span className="login-feature-dot" />
+      <div>
+        <strong>{title}</strong>
+        <p>{detail}</p>
       </div>
     </div>
   );
 }
 
-function LoginHero() {
-  const nextPath = useMemo(() => new URLSearchParams(window.location.search).get("next") || "/dashboard", []);
+function LoginScreen() {
+  const nextPath = useMemo(
+    () => new URLSearchParams(window.location.search).get("next") || "/dashboard",
+    []
+  );
   const [form, setForm] = useState({ username: "", password: "" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setSubmitting(true);
     setError("");
+
     try {
       const response = await fetch("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, next: nextPath })
       });
+
       const payload = await response.json();
       if (!response.ok) {
-        setError(payload.message || "登录失败，请检查账号和密码");
+        setError(payload.message || "登录失败，请检查账号和密码。");
         return;
       }
+
       window.location.href = payload.redirect || nextPath;
-    } catch (requestError) {
+    } catch {
       setError("网络暂时不可用，请稍后重试。");
     } finally {
       setSubmitting(false);
@@ -81,125 +68,95 @@ function LoginHero() {
   }
 
   return (
-    <section className="relative min-h-screen overflow-hidden bg-white">
-      <div className="absolute inset-0">
-        <video
-          className="w-full h-full object-cover [transform:scaleY(-1)]"
-          src={VIDEO_URL}
-          autoPlay
-          muted
-          loop
-          playsInline
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-[26.416%] from-[rgba(255,255,255,0)] to-[66.943%] to-white" />
+    <section className="login-scene">
+      <div className="login-scene-media">
+        <video className="login-scene-video" src={VIDEO_URL} autoPlay muted loop playsInline />
+        <div className="login-scene-overlay" />
       </div>
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[1200px] items-start px-6 pb-16 pt-[290px] sm:px-8 lg:px-10">
-        <div className="grid w-full gap-14 lg:grid-cols-[1.1fr_460px] lg:gap-12">
-          <div className="flex flex-col gap-8">
-            <motion.div custom={0} initial="hidden" animate="show" variants={itemVariants}>
-              <span className="inline-flex rounded-full border border-slate-200/70 bg-white/75 px-4 py-2 text-xs font-medium uppercase tracking-[0.28em] text-slate-600 shadow-[0px_12px_35px_-24px_rgba(15,23,42,0.4)] backdrop-blur-md">
-                CookieCloud Monitor
-              </span>
-            </motion.div>
+      <div className="login-stage">
+        <motion.div className="login-shell" initial="hidden" animate="show" variants={fadeUp}>
+          <motion.section className="login-story" variants={fadeUp} custom={0.08}>
+            <div className="login-badge">COOKIEPILOT</div>
+            <h1>进入同步控制台，查看每天 CookieCloud 是否真的跑成功。</h1>
+            <p>
+              这里会集中呈现同步成功率、UUID 汇总、站点明细、运行异常和企业微信通知状态，不再依赖弹窗登录。
+            </p>
 
-            <motion.h1
-              custom={0.08}
-              initial="hidden"
-              animate="show"
-              variants={itemVariants}
-              className="font-geist text-[48px] font-medium leading-[0.95] tracking-[-0.04em] text-slate-950 sm:text-[64px] lg:text-[80px]"
-            >
-              Simple{" "}
-              <span className="font-instrument text-[58px] italic tracking-[-0.04em] sm:text-[74px] lg:text-[100px]">
-                management
-              </span>{" "}
-              for your remote team
-            </motion.h1>
-
-            <motion.p
-              custom={0.16}
-              initial="hidden"
-              animate="show"
-              variants={itemVariants}
-              className="max-w-[554px] text-[18px] leading-8 text-[#373a46]/80"
-            >
-              统一查看 CookieCloud 每天的同步状态、CK 变化、失败原因和登录行为，并在关键事件发生时及时推送到你的企业微信应用。
-            </motion.p>
-
-            <motion.div custom={0.24} initial="hidden" animate="show" variants={itemVariants}>
-              <ReviewBadge />
-            </motion.div>
-          </div>
-
-          <motion.div
-            custom={0.24}
-            initial="hidden"
-            animate="show"
-            variants={itemVariants}
-            className="glass-panel rounded-[36px] border border-white/70 p-5 shadow-[0px_24px_90px_-30px_rgba(15,23,42,0.35)]"
-          >
-            <div className="rounded-[32px] bg-white/88 p-6 shadow-[inset_0px_1px_0px_rgba(255,255,255,0.7)]">
-              <div className="mb-8 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-[0.26em] text-slate-500">安全登录</p>
-                  <h2 className="mt-3 text-[32px] font-medium tracking-[-0.04em] text-slate-950">进入监控控制台</h2>
-                </div>
-                <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-medium text-white">会话登录</span>
+            <div className="login-story-grid">
+              <div className="login-story-card">
+                <span>能力</span>
+                <strong>同步监控</strong>
+                <small>按天查看成功、失败和最新同步时间</small>
               </div>
-
-              <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-                <div className="rounded-[40px] border border-slate-200/80 bg-[#fcfcfc] p-2 shadow-[0px_10px_40px_5px_rgba(194,194,194,0.25)]">
-                  <div className="grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
-                    <input
-                      type="text"
-                      value={form.username}
-                      onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-                      placeholder="登录账号"
-                      autoComplete="username"
-                      className="h-14 rounded-[32px] border border-transparent bg-transparent px-5 text-[15px] text-slate-900 outline-none placeholder:text-slate-400"
-                      required
-                    />
-                    <input
-                      type="password"
-                      value={form.password}
-                      onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                      placeholder="登录密码"
-                      autoComplete="current-password"
-                      className="h-14 rounded-[32px] border border-transparent bg-transparent px-5 text-[15px] text-slate-900 outline-none placeholder:text-slate-400"
-                      required
-                    />
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="h-14 rounded-full bg-[linear-gradient(180deg,#252525_0%,#050505_100%)] px-7 text-sm font-medium text-white shadow-[0px_12px_30px_rgba(15,23,42,0.28),inset_-4px_-6px_25px_0px_rgba(201,201,201,0.08),inset_4px_4px_10px_0px_rgba(29,29,29,0.24)] transition hover:translate-y-[-1px] disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {submitting ? "登录中..." : "进入控制台"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 text-sm text-slate-600">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="font-medium text-slate-900">通知能力已就绪</p>
-                      <p className="mt-2 leading-7">
-                        企业微信应用通知可以推送首次同步、CK 数量增加、CK 数量减少，以及每一次成功的后台登录事件。
-                      </p>
-                    </div>
-                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
-                      企业微信
-                    </span>
-                  </div>
-
-                  {error ? (
-                    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
-                  ) : null}
-                </div>
-              </form>
+              <div className="login-story-card">
+                <span>通知</span>
+                <strong>企业微信推送</strong>
+                <small>支持首登、增减 CK、同步异常提醒</small>
+              </div>
             </div>
-          </motion.div>
-        </div>
+
+            <div className="login-feature-list">
+              <LoginFeature title="每日同步概览" detail="快速确认今天有没有同步、有多少次成功、是否出现失败。" />
+              <LoginFeature title="站点明细回溯" detail="只展示站点名称、站点域名和同步时间，不暴露 Cookie 明文。" />
+              <LoginFeature title="公网安全接入" detail="搭配登录保护和反向代理，适合部署到 NAS 并开放外网使用。" />
+            </div>
+          </motion.section>
+
+          <motion.section className="login-panel" variants={fadeUp} custom={0.16}>
+            <div className="login-panel-head">
+              <p className="login-overline">安全登录</p>
+              <h2>欢迎回来</h2>
+              <p>输入面板账号后进入监控后台。</p>
+            </div>
+
+            <motion.form className="login-form" onSubmit={handleSubmit} variants={fadeUp} custom={0.22}>
+              <label className="login-field">
+                <span>用户名</span>
+                <input
+                  type="text"
+                  placeholder="请输入用户名"
+                  value={form.username}
+                  autoComplete="username"
+                  onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+                  required
+                />
+              </label>
+
+              <label className="login-field">
+                <span>密码</span>
+                <div className="login-password-wrap">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="请输入密码"
+                    value={form.password}
+                    autoComplete="current-password"
+                    onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle"
+                    onClick={() => setShowPassword((value) => !value)}
+                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                  >
+                    {showPassword ? "隐藏" : "显示"}
+                  </button>
+                </div>
+              </label>
+
+              {error ? <div className="login-error">{error}</div> : null}
+
+              <button type="submit" className="login-submit" disabled={submitting}>
+                {submitting ? "登录中..." : "进入控制台"}
+              </button>
+
+              <div className="login-helper">
+                登录后可查看同步成功/失败、站点明细、运行日志，并使用企业微信应用接收推送通知。
+              </div>
+            </motion.form>
+          </motion.section>
+        </motion.div>
       </div>
     </section>
   );
@@ -209,6 +166,6 @@ document.documentElement.dataset.loginApp = "ready";
 
 createRoot(document.getElementById("login-root")).render(
   <React.StrictMode>
-    <LoginHero />
+    <LoginScreen />
   </React.StrictMode>
 );

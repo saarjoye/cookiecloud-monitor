@@ -7,340 +7,422 @@
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-    <main class="page page-shell">
-        <section class="topbar panel-surface">
-            <div class="topbar-copy">
-                <p class="eyebrow">CookieCloud Monitor</p>
-                <h1>同步监控、失败排查与每日统计</h1>
-                <p class="subtle">
-                    当前上游 <code>{{ target_url }}</code>
-                    <span class="separator-dot"></span>
-                    今日日期 <code>{{ summary.today }}</code>
-                    <span class="separator-dot"></span>
-                    面板账号 <strong>{{ dashboard_username }}</strong>
-                </p>
-            </div>
-            <div class="topbar-tools">
-                <div class="tool-chip">
-                    <span class="tool-chip-label">通知状态</span>
-                    <strong>{{ '已启用' if summary.notification_enabled else '未配置' }}</strong>
-                </div>
-                <div class="tool-chip">
-                    <span class="tool-chip-label">登录保护</span>
-                    <strong>{{ '已开启' if summary.auth_enabled else '未开启' }}</strong>
-                </div>
-                <div class="tool-chip">
-                    <span class="tool-chip-label">运行日志文件</span>
-                    <strong>{{ app_log_path }}</strong>
-                </div>
-                <a class="button button-ghost" href="{{ settings_url }}">系统设置</a>
-                <a class="button button-ghost" href="{{ runtime_logs_url }}">运行日志</a>
-                <a class="button button-ghost" href="{{ logout_url }}">退出登录</a>
-            </div>
-        </section>
-
-        <section class="hero panel-surface hero-dashboard">
-            <div class="hero-main">
-                <div class="hero-kicker">
-                    <span class="status-dot"></span>
-                    前置代理模式
-                </div>
-                <h2>让浏览器插件先经过当前 Monitor，日志、统计、通知和同步详情才能完整记录。</h2>
-                <p class="hero-text">浏览器插件的服务器地址应指向当前 Monitor，或者由反向代理先转发到 Monitor，再由 Monitor 转发到真实 CookieCloud。</p>
-                <div class="notice-grid">
-                    <article class="notice-card">
-                        <span class="metric-label">上游 CookieCloud</span>
-                        <strong><code>{{ target_url }}</code></strong>
-                    </article>
-                    <article class="notice-card">
-                        <span class="metric-label">最近日志条数</span>
-                        <strong>{{ recent_log_limit }}</strong>
-                    </article>
-                </div>
-            </div>
-            <div class="hero-side">
-                <div class="hero-side-card">
-                    <span class="hero-side-label">今日成功率</span>
-                    <strong>{{ summary.metrics.success_rate }}%</strong>
-                    <small>基于今日全部上传与下载请求计算。</small>
-                </div>
-                <div class="hero-side-card danger-tint">
-                    <span class="hero-side-label">今日失败请求</span>
-                    <strong>{{ summary.metrics.failed_today }}</strong>
-                    <small>失败数持续增长时，优先检查插件入口地址、反代配置和上游状态。</small>
-                </div>
-            </div>
-        </section>
-
-        <section class="cards">
-            <article class="metric-card">
-                <span class="metric-label">今日总请求</span>
-                <strong>{{ summary.metrics.total_today }}</strong>
-                <small>上传与下载请求合计。</small>
-            </article>
-            <article class="metric-card">
-                <span class="metric-label">今日成功</span>
-                <strong>{{ summary.metrics.success_today }}</strong>
-                <small>当前成功率 {{ summary.metrics.success_rate }}%</small>
-            </article>
-            <article class="metric-card metric-card-danger">
-                <span class="metric-label">今日失败</span>
-                <strong>{{ summary.metrics.failed_today }}</strong>
-                <small>用于观察异常波动。</small>
-            </article>
-            <article class="metric-card">
-                <span class="metric-label">已跟踪 UUID</span>
-                <strong>{{ summary.metrics.tracked_uuids }}</strong>
-                <small>最近同步时间 {{ summary.metrics.last_sync_at or '暂无' }}</small>
-            </article>
-        </section>
-
-        <section class="panel panel-surface">
-            <div class="panel-head">
+<body class="console-body">
+    <div class="console-shell">
+        <aside class="console-sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-badge">C</div>
                 <div>
-                    <p class="section-kicker">今日概览</p>
-                    <h2>今日动作分布</h2>
+                    <strong>COOKIEPILOT</strong>
+                    <span>CookieCloud Monitor Console</span>
                 </div>
             </div>
-            <div class="split-stats">
-                <div class="mini-stat">
-                    <span>上传成功</span>
-                    <strong>{{ summary.metrics.upload_success }}</strong>
+
+            <nav class="sidebar-nav">
+                <div class="sidebar-group">
+                    <span class="sidebar-group-title">总览</span>
+                    <a class="sidebar-link active" href="/dashboard">
+                        <span class="sidebar-icon">01</span>
+                        <span>监控首页</span>
+                    </a>
+                    <a class="sidebar-link" href="#recent-sync">
+                        <span class="sidebar-icon">02</span>
+                        <span>同步动态</span>
+                    </a>
+                    <a class="sidebar-link" href="#sync-log-board">
+                        <span class="sidebar-icon">03</span>
+                        <span>同步明细</span>
+                    </a>
                 </div>
-                <div class="mini-stat danger-soft">
-                    <span>上传失败</span>
-                    <strong>{{ summary.metrics.upload_failed }}</strong>
+
+                <div class="sidebar-group">
+                    <span class="sidebar-group-title">管理</span>
+                    <a class="sidebar-link" href="{{ settings_url }}">
+                        <span class="sidebar-icon">ST</span>
+                        <span>系统设置</span>
+                    </a>
+                    <a class="sidebar-link" href="{{ runtime_logs_url }}">
+                        <span class="sidebar-icon">RT</span>
+                        <span>运行日志</span>
+                    </a>
+                    <a class="sidebar-link" href="#uuid-board">
+                        <span class="sidebar-icon">ID</span>
+                        <span>UUID 汇总</span>
+                    </a>
                 </div>
-                <div class="mini-stat">
-                    <span>下载成功</span>
-                    <strong>{{ summary.metrics.download_success }}</strong>
+
+                <div class="sidebar-group">
+                    <span class="sidebar-group-title">账户</span>
+                    <a class="sidebar-link" href="{{ logout_url }}">
+                        <span class="sidebar-icon">OT</span>
+                        <span>退出登录</span>
+                    </a>
                 </div>
-                <div class="mini-stat danger-soft">
-                    <span>下载失败</span>
-                    <strong>{{ summary.metrics.download_failed }}</strong>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-footer-title">当前会话</div>
+                <div class="sidebar-footer-user">{{ dashboard_username or "Monitor" }}</div>
+                <div class="sidebar-footer-meta">
+                    <span class="live-dot"></span>
+                    <span>服务运行中</span>
                 </div>
             </div>
-        </section>
+        </aside>
 
-        <section class="grid">
-            <section class="panel panel-surface">
-                <div class="panel-head">
-                    <div>
-                        <p class="section-kicker">趋势统计</p>
-                        <h2>最近 7 天趋势</h2>
+        <main class="console-main">
+            <header class="console-header">
+                <div class="console-header-copy">
+                    <p class="eyebrow">CookieCloud Monitor</p>
+                    <h1>同步控制台</h1>
+                    <p class="subtle">集中查看每日同步成功率、最近同步对象、站点明细和运行异常，整体布局按控制台风格重新整理。</p>
+                </div>
+
+                <div class="console-header-actions">
+                    <div class="header-chip">
+                        <span>最近同步</span>
+                        <strong>{{ summary.metrics.last_sync_at or "暂无记录" }}</strong>
                     </div>
-                </div>
-                {% if summary.daily_stats %}
-                <div class="trend-list">
-                    {% for item in summary.daily_stats %}
-                    <div class="trend-row">
-                        <div class="trend-meta">
-                            <strong>{{ item.occurred_day }}</strong>
-                            <span>成功 {{ item.success_count }} / 失败 {{ item.failed_count }}</span>
-                        </div>
-                        <div class="bar-shell">
-                            <div class="bar-fill" style="width: {{ item.bar_pct }}%"></div>
-                        </div>
-                        <div class="trend-total">{{ item.total_count }}</div>
+                    <div class="header-chip accent">
+                        <span>今日成功率</span>
+                        <strong>{{ summary.metrics.success_rate }}%</strong>
                     </div>
-                    {% endfor %}
+                    <form class="console-search" method="get" action="/dashboard">
+                        <span class="search-icon">⌕</span>
+                        <input type="text" name="sync_uuid" value="{{ filters.sync_uuid }}" placeholder="搜索 UUID">
+                        <input type="hidden" name="action" value="{{ filters.action }}">
+                        <input type="hidden" name="outcome" value="{{ filters.outcome }}">
+                        <input type="hidden" name="day" value="{{ filters.day }}">
+                        <button class="search-action" type="submit">搜索</button>
+                    </form>
                 </div>
-                {% else %}
-                <p class="empty">暂无同步记录。先确认浏览器插件入口地址是否已经指向当前 Monitor 服务。</p>
-                {% endif %}
-            </section>
+            </header>
 
-            <section class="panel panel-surface">
-                <div class="panel-head">
-                    <div>
-                        <p class="section-kicker">对象汇总</p>
-                        <h2>UUID 汇总</h2>
-                    </div>
-                </div>
-                {% if summary.uuid_summary %}
-                <div class="table-shell">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>UUID</th>
-                                <th>成功</th>
-                                <th>失败</th>
-                                <th>最后同步</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in summary.uuid_summary %}
-                            {% set display_uuid = item.sync_uuid if item.sync_uuid and item.sync_uuid != 'unknown' else '未识别' %}
-                            <tr>
-                                <td><code>{{ display_uuid }}</code></td>
-                                <td>{{ item.success_count }}</td>
-                                <td>{{ item.failed_count }}</td>
-                                <td>{{ item.last_seen_at or '-' }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <p class="helper-text">`未识别` 表示这条请求已经成功转发，但 Monitor 没有从该次请求体中提取到 UUID。旧日志不会自动回填，需看新的同步记录。</p>
-                {% else %}
-                <p class="empty">还没有可用于汇总的 UUID 记录。</p>
-                {% endif %}
-            </section>
-        </section>
-
-        <section class="panel panel-surface">
-            <div class="panel-head panel-head-stack">
-                <div>
-                    <p class="section-kicker">最近同步</p>
-                    <h2>最近 {{ recent_log_limit }} 条同步记录</h2>
-                </div>
-                <p class="subtle">已改成卡片流布局，避免窄屏或 NAS 面板下“查看按钮”被表格最后一列挤掉。</p>
-            </div>
-            <form method="get" action="/dashboard" class="filters">
-                <label>
-                    UUID
-                    <input type="text" name="sync_uuid" value="{{ filters.sync_uuid }}" placeholder="按 UUID 过滤">
-                </label>
-                <label>
-                    动作
-                    <select name="action">
-                        <option value="">全部</option>
-                        <option value="upload" {% if filters.action == 'upload' %}selected{% endif %}>上传</option>
-                        <option value="download" {% if filters.action == 'download' %}selected{% endif %}>下载</option>
-                    </select>
-                </label>
-                <label>
-                    结果
-                    <select name="outcome">
-                        <option value="">全部</option>
-                        <option value="success" {% if filters.outcome == 'success' %}selected{% endif %}>成功</option>
-                        <option value="failed" {% if filters.outcome == 'failed' %}selected{% endif %}>失败</option>
-                    </select>
-                </label>
-                <label>
-                    日期
-                    <input type="date" name="day" value="{{ filters.day }}">
-                </label>
-                <button type="submit" class="button">筛选</button>
-            </form>
-
-            {% if logs %}
-            <div class="log-list">
-                {% for log in logs %}
-                {% set display_uuid = log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别' %}
-                <article class="log-card">
-                    <div class="log-card-head">
-                        <div class="log-card-title">
-                            <strong>{{ log.occurred_at }}</strong>
-                            <p>{{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}请求</p>
-                        </div>
-                        <div class="log-card-badges">
-                            <span class="tag">{{ '上传' if log.action == 'upload' else '下载' if log.action == 'download' else log.action }}</span>
-                            <span class="status {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">
-                                {{ '成功' if log.outcome == 'success' else '失败' if log.outcome == 'failed' else log.outcome }}
-                            </span>
-                        </div>
+            <section class="summary-grid">
+                <article class="hero-card surface-card">
+                    <div class="hero-card-copy">
+                        <p class="card-kicker">同步健康</p>
+                        <h2>今天的 CookieCloud 同步链路整体稳定，关键指标和最近动态都在这里。</h2>
+                        <p class="hero-description">这张主卡片会优先展示今日请求量、活跃对象和最后一次同步时间，方便你一眼判断今天到底有没有跑起来。</p>
                     </div>
 
-                    <div class="log-card-meta">
-                        <div class="meta-pair">
-                            <span class="meta-label">UUID</span>
-                            <code class="meta-value">{{ display_uuid }}</code>
+                    <div class="hero-card-side">
+                        <div class="hero-figure">
+                            <span>{{ summary.metrics.success_rate }}%</span>
+                            <small>今日成功率</small>
                         </div>
-                        <div class="meta-pair">
-                            <span class="meta-label">状态码</span>
-                            <span class="meta-value">{{ log.http_status or '-' }}</span>
+                        <div class="hero-progress">
+                            <div class="hero-progress-bar" style="width: {{ summary.metrics.success_rate }}%"></div>
                         </div>
-                        <div class="meta-pair">
-                            <span class="meta-label">耗时</span>
-                            <span class="meta-value">{{ log.duration_ms }} ms</span>
+                        <div class="hero-tags">
+                            <span class="hero-tag">上传成功 {{ summary.metrics.upload_success }}</span>
+                            <span class="hero-tag">下载成功 {{ summary.metrics.download_success }}</span>
                         </div>
-                        <div class="meta-pair">
-                            <span class="meta-label">客户端</span>
-                            <span class="meta-value">{{ log.client_ip or '-' }}</span>
-                        </div>
-                    </div>
-
-                    <div class="log-card-actions">
-                        <a class="button" href="/logs/{{ log.id }}">查看详情</a>
                     </div>
                 </article>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="empty">当前筛选条件下没有同步记录。</p>
-            {% endif %}
-        </section>
 
-        <section class="grid">
-            <section class="panel panel-surface">
-                <div class="panel-head">
-                    <div>
-                        <p class="section-kicker">安全记录</p>
-                        <h2>最近登录事件</h2>
-                    </div>
+                <div class="metric-stack">
+                    <article class="metric-tile surface-card">
+                        <span class="metric-label">今日总请求</span>
+                        <strong>{{ summary.metrics.total_today }}</strong>
+                        <small>已接入 Monitor 的同步总次数</small>
+                    </article>
+                    <article class="metric-tile surface-card">
+                        <span class="metric-label">活跃 UUID</span>
+                        <strong>{{ summary.metrics.tracked_uuids }}</strong>
+                        <small>今日有同步行为的对象数量</small>
+                    </article>
+                    <article class="metric-tile surface-card">
+                        <span class="metric-label">上传失败</span>
+                        <strong>{{ summary.metrics.upload_failed }}</strong>
+                        <small>需要重点排查的上传异常</small>
+                    </article>
+                    <article class="metric-tile surface-card">
+                        <span class="metric-label">下载失败</span>
+                        <strong>{{ summary.metrics.download_failed }}</strong>
+                        <small>读取端最近失败次数</small>
+                    </article>
                 </div>
-                {% if auth_events %}
-                <div class="timeline-list">
-                    {% for event in auth_events %}
-                    <div class="timeline-item">
-                        <div class="timeline-dot {% if event.outcome == 'success' %}success{% else %}failed{% endif %}"></div>
+            </section>
+
+            <section class="dashboard-grid">
+                <article class="surface-card panel-card activity-card" id="recent-sync">
+                    <div class="card-heading compact">
                         <div>
-                            <strong>{{ event.username }}</strong>
-                            <p>{{ event.occurred_at }} · {{ event.client_ip or '-' }}</p>
-                            <p>{{ '登录成功' if event.outcome == 'success' else '登录失败' if event.outcome == 'failed' else event.outcome }} · {{ event.user_agent or '-' }}</p>
+                            <p class="card-kicker">活动流</p>
+                            <h2>最近同步动态</h2>
+                        </div>
+                        <a class="ghost-action small" href="#sync-log-board">查看全部明细</a>
+                    </div>
+
+                    {% if logs %}
+                    <div class="activity-list">
+                        {% for log in logs[:6] %}
+                        {% set display_uuid = log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别 UUID' %}
+                        <div class="activity-item">
+                            <div class="activity-avatar">{{ 'UP' if log.action == 'upload' else 'DN' if log.action == 'download' else 'EV' }}</div>
+                            <div class="activity-copy">
+                                <strong>{{ '上传同步' if log.action == 'upload' else '下载同步' if log.action == 'download' else log.action }}</strong>
+                                <span>{{ display_uuid }}</span>
+                                <small>{{ log.occurred_at }}</small>
+                            </div>
+                            <div class="activity-side">
+                                <span class="status-pill {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">
+                                    {{ '成功' if log.outcome == 'success' else '失败' }}
+                                </span>
+                                <a class="mini-link" href="/logs/{{ log.id }}">查看详情</a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="empty-state">还没有同步记录。请先确认浏览器插件里的服务地址已经切换到当前 Monitor。</p>
+                    {% endif %}
+                </article>
+
+                <article class="surface-card chart-card">
+                    <div class="card-heading compact">
+                        <div>
+                            <p class="card-kicker">趋势</p>
+                            <h2>最近 7 天同步走势</h2>
                         </div>
                     </div>
+
+                    {% if summary.daily_stats %}
+                    <div class="trend-chart">
+                        {% for item in summary.daily_stats %}
+                        <div class="trend-line-row">
+                            <div class="trend-line-meta">
+                                <strong>{{ item.occurred_day }}</strong>
+                                <span>成功 {{ item.success_count }} / 失败 {{ item.failed_count }}</span>
+                            </div>
+                            <div class="trend-line-track">
+                                <div class="trend-line-fill" style="width: {{ item.bar_pct }}%"></div>
+                            </div>
+                            <div class="trend-line-total">{{ item.total_count }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="empty-state">最近 7 天还没有足够的数据用于绘制趋势。</p>
+                    {% endif %}
+                </article>
+
+                <article class="surface-card metric-panel">
+                    <div class="card-heading compact">
+                        <div>
+                            <p class="card-kicker">筛选器</p>
+                            <h2>日志过滤</h2>
+                        </div>
+                    </div>
+                    <form method="get" action="/dashboard" class="stack-form">
+                        <label class="stack-field">
+                            <span>UUID</span>
+                            <input type="text" name="sync_uuid" value="{{ filters.sync_uuid }}" placeholder="按 UUID 过滤">
+                        </label>
+                        <label class="stack-field">
+                            <span>动作</span>
+                            <select name="action">
+                                <option value="">全部</option>
+                                <option value="upload" {% if filters.action == 'upload' %}selected{% endif %}>上传</option>
+                                <option value="download" {% if filters.action == 'download' %}selected{% endif %}>下载</option>
+                            </select>
+                        </label>
+                        <label class="stack-field">
+                            <span>结果</span>
+                            <select name="outcome">
+                                <option value="">全部</option>
+                                <option value="success" {% if filters.outcome == 'success' %}selected{% endif %}>成功</option>
+                                <option value="failed" {% if filters.outcome == 'failed' %}selected{% endif %}>失败</option>
+                            </select>
+                        </label>
+                        <label class="stack-field">
+                            <span>日期</span>
+                            <input type="date" name="day" value="{{ filters.day }}">
+                        </label>
+                        <button class="primary-action" type="submit">应用筛选</button>
+                    </form>
+                </article>
+
+                <article class="surface-card metric-panel" id="uuid-board">
+                    <div class="card-heading compact">
+                        <div>
+                            <p class="card-kicker">对象汇总</p>
+                            <h2>UUID 汇总</h2>
+                        </div>
+                    </div>
+
+                    {% if summary.uuid_summary %}
+                    <div class="summary-table">
+                        {% for item in summary.uuid_summary %}
+                        {% set display_uuid = item.sync_uuid if item.sync_uuid and item.sync_uuid != 'unknown' else '未识别 UUID' %}
+                        <div class="summary-row">
+                            <div class="summary-main">
+                                <strong>{{ display_uuid }}</strong>
+                                <span>最后同步 {{ item.last_seen_at or '-' }}</span>
+                            </div>
+                            <div class="summary-meta">
+                                <span>成功 {{ item.success_count }}</span>
+                                <span>失败 {{ item.failed_count }}</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="empty-state">还没有可以用于汇总的 UUID 记录。</p>
+                    {% endif %}
+                </article>
+
+                <article class="surface-card metric-panel">
+                    <div class="card-heading compact">
+                        <div>
+                            <p class="card-kicker">安全记录</p>
+                            <h2>最近登录事件</h2>
+                        </div>
+                    </div>
+                    {% if auth_events %}
+                    <div class="timeline-list modern">
+                        {% for event in auth_events %}
+                        <div class="timeline-item modern">
+                            <div class="timeline-dot {% if event.outcome == 'success' %}success{% else %}failed{% endif %}"></div>
+                            <div>
+                                <strong>{{ event.username }}</strong>
+                                <p>{{ event.occurred_at }} · {{ event.client_ip or '-' }}</p>
+                                <p>{{ '登录成功' if event.outcome == 'success' else '登录失败' if event.outcome == 'failed' else event.outcome }}</p>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="empty-state">暂无登录事件。</p>
+                    {% endif %}
+                </article>
+            </section>
+
+            <section class="surface-card log-board" id="sync-log-board">
+                <div class="card-heading compact">
+                    <div>
+                        <p class="card-kicker">同步明细</p>
+                        <h2>最近 {{ recent_log_limit }} 条同步日志</h2>
+                    </div>
+                </div>
+
+                {% if logs %}
+                <div class="monitor-log-list">
+                    {% for log in logs %}
+                    {% set display_uuid = log.sync_uuid if log.sync_uuid and log.sync_uuid != 'unknown' else '未识别 UUID' %}
+                    <article class="monitor-log-card">
+                        <div class="monitor-log-top">
+                            <div>
+                                <strong>{{ log.occurred_at }}</strong>
+                                <p>{{ '上传同步' if log.action == 'upload' else '下载同步' if log.action == 'download' else log.action }}</p>
+                            </div>
+                            <div class="monitor-log-badges">
+                                <span class="status-pill neutral">{{ display_uuid }}</span>
+                                <span class="status-pill {% if log.outcome == 'success' %}ok{% else %}bad{% endif %}">
+                                    {{ '成功' if log.outcome == 'success' else '失败' }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="monitor-log-metrics">
+                            <div>
+                                <span>状态码</span>
+                                <strong>{{ log.http_status or '-' }}</strong>
+                            </div>
+                            <div>
+                                <span>耗时</span>
+                                <strong>{{ log.duration_ms }} ms</strong>
+                            </div>
+                            <div>
+                                <span>客户端</span>
+                                <strong>{{ log.client_ip or '-' }}</strong>
+                            </div>
+                            <div>
+                                <span>请求路径</span>
+                                <strong>{{ log.request_path }}</strong>
+                            </div>
+                        </div>
+
+                        <div class="monitor-log-actions">
+                            <a class="ghost-action" href="/logs/{{ log.id }}">查看详情</a>
+                        </div>
+                    </article>
                     {% endfor %}
                 </div>
                 {% else %}
-                <p class="empty">暂无登录事件。</p>
+                <p class="empty-state">当前筛选条件下没有同步日志。</p>
                 {% endif %}
             </section>
 
-            <section class="panel panel-surface">
-                <div class="panel-head">
-                    <div>
-                        <p class="section-kicker">运行异常</p>
-                        <h2>最近应用错误与告警</h2>
+            <section class="bottom-grid">
+                <article class="surface-card panel-card runtime-panel" id="runtime-alerts">
+                    <div class="card-heading compact">
+                        <div>
+                            <p class="card-kicker">运行告警</p>
+                            <h2>最近应用错误与告警</h2>
+                        </div>
+                        <a class="ghost-action small" href="{{ runtime_logs_url }}">查看全部</a>
                     </div>
-                    <a class="button button-ghost" href="{{ runtime_logs_url }}">查看全部</a>
-                </div>
-                {% if runtime_logs %}
-                <div class="log-list compact-list">
-                    {% for item in runtime_logs %}
-                    <article class="log-card log-card-compact">
-                        <div class="log-card-head">
-                            <div class="log-card-title">
+                    {% if runtime_logs %}
+                    <div class="alert-list">
+                        {% for item in runtime_logs %}
+                        <div class="alert-item">
+                            <div>
                                 <strong>{{ item.occurred_at }}</strong>
                                 <p>{{ item.source }}</p>
                             </div>
-                            <div class="log-card-badges">
-                                <span class="status {% if item.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ item.level }}</span>
+                            <span class="status-pill {% if item.level == 'ERROR' %}bad{% else %}ok{% endif %}">{{ item.level }}</span>
+                            <a class="mini-link" href="/runtime-logs/{{ item.id }}">查看</a>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="empty-state">当前没有运行异常日志。</p>
+                    {% endif %}
+                </article>
+
+                <article class="surface-card panel-card summary-panel">
+                    <div class="card-heading compact">
+                        <div>
+                            <p class="card-kicker">同步概况</p>
+                            <h2>动作分布</h2>
+                        </div>
+                    </div>
+
+                    <div class="quick-metrics">
+                        <div class="quick-metric violet">
+                            <span class="quick-metric-icon">UP</span>
+                            <div>
+                                <small>上传成功</small>
+                                <strong>{{ summary.metrics.upload_success }}</strong>
                             </div>
                         </div>
-                        <div class="log-card-meta">
-                            <div class="meta-pair meta-pair-wide">
-                                <span class="meta-label">消息</span>
-                                <span class="meta-value">{{ item.message }}</span>
-                            </div>
-                            <div class="meta-pair meta-pair-wide">
-                                <span class="meta-label">请求</span>
-                                <code class="meta-value">{{ item.request_method or '-' }} {{ item.request_path or '-' }}</code>
+                        <div class="quick-metric green">
+                            <span class="quick-metric-icon">DN</span>
+                            <div>
+                                <small>下载成功</small>
+                                <strong>{{ summary.metrics.download_success }}</strong>
                             </div>
                         </div>
-                        <div class="log-card-actions">
-                            <a class="button button-ghost" href="/runtime-logs/{{ item.id }}">查看</a>
+                        <div class="quick-metric amber">
+                            <span class="quick-metric-icon">UF</span>
+                            <div>
+                                <small>上传失败</small>
+                                <strong>{{ summary.metrics.upload_failed }}</strong>
+                            </div>
                         </div>
-                    </article>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="empty">当前还没有应用异常。新的错误会同时写入数据库和 <code>{{ app_log_path }}</code>。</p>
-                {% endif %}
+                        <div class="quick-metric blue">
+                            <span class="quick-metric-icon">DF</span>
+                            <div>
+                                <small>下载失败</small>
+                                <strong>{{ summary.metrics.download_failed }}</strong>
+                            </div>
+                        </div>
+                    </div>
+                </article>
             </section>
-        </section>
-    </main>
+        </main>
+    </div>
 </body>
 </html>
